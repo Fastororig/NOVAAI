@@ -44,6 +44,8 @@ fun SettingsScreen(
     var systemInstructionText by remember { mutableStateOf(viewModel.systemInstruction) }
     var temperatureValue by remember { mutableFloatStateOf(viewModel.temperature) }
     var isWatchMode by remember { mutableStateOf(viewModel.isWatchMode) }
+    var isStreamingEnabled by remember { mutableStateOf(viewModel.isStreamingEnabled) }
+    var isDynamicModelsEnabled by remember { mutableStateOf(viewModel.isDynamicModelsEnabled) }
 
     val scrollState = rememberScrollState()
 
@@ -72,7 +74,9 @@ fun SettingsScreen(
                                 model = selectedModel,
                                 systemInstruction = systemInstructionText.trim(),
                                 temperature = temperatureValue,
-                                isWatchMode = isWatchMode
+                                isWatchMode = isWatchMode,
+                                isStreamingEnabled = isStreamingEnabled,
+                                isDynamicModelsEnabled = isDynamicModelsEnabled
                             )
                             Toast.makeText(context, "Настройки сохранены", Toast.LENGTH_SHORT).show()
                             onBack()
@@ -190,6 +194,92 @@ fun SettingsScreen(
                 }
             }
 
+            // Additional Features (Streaming & Dynamic Models)
+            Card(
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF1E293B)),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    // Streaming Switch
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Потоковая генерация ответов",
+                                color = TextPrimary,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Text(
+                                text = "Постепенный вывод текста по мере формирования ответа моделью",
+                                color = TextSecondary,
+                                fontSize = 12.sp,
+                                lineHeight = 16.sp
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Switch(
+                            checked = isStreamingEnabled,
+                            onCheckedChange = { checked ->
+                                isStreamingEnabled = checked
+                                viewModel.setStreamingEnabled(checked)
+                            },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color.Black,
+                                checkedTrackColor = NovaPrimary,
+                                uncheckedThumbColor = TextMuted,
+                                uncheckedTrackColor = DarkSurfaceVariant
+                            )
+                        )
+                    }
+
+                    HorizontalDivider(color = DarkBorder)
+
+                    // Dynamic Models Switch
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Динамическая подгрузка моделей",
+                                color = TextPrimary,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Text(
+                                text = "Автоматическое получение доступных моделей через Gemini API",
+                                color = TextSecondary,
+                                fontSize = 12.sp,
+                                lineHeight = 16.sp
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Switch(
+                            checked = isDynamicModelsEnabled,
+                            onCheckedChange = { checked ->
+                                isDynamicModelsEnabled = checked
+                                viewModel.setDynamicModelsEnabled(checked)
+                            },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color.Black,
+                                checkedTrackColor = NovaPrimary,
+                                uncheckedThumbColor = TextMuted,
+                                uncheckedTrackColor = DarkSurfaceVariant
+                            )
+                        )
+                    }
+                }
+            }
+
             // Security Warning Card
             Card(
                 colors = CardDefaults.cardColors(containerColor = Color(0xFF1E293B)),
@@ -285,7 +375,9 @@ fun SettingsScreen(
                                         model = selectedModel,
                                         systemInstruction = systemInstructionText.trim(),
                                         temperature = temperatureValue,
-                                        isWatchMode = isWatchMode
+                                        isWatchMode = isWatchMode,
+                                        isStreamingEnabled = isStreamingEnabled,
+                                        isDynamicModelsEnabled = isDynamicModelsEnabled
                                     )
                                 }
                                 viewModel.refreshModels()
@@ -326,7 +418,9 @@ fun SettingsScreen(
                                         model = selectedModel,
                                         systemInstruction = systemInstructionText.trim(),
                                         temperature = temperatureValue,
-                                        isWatchMode = isWatchMode
+                                        isWatchMode = isWatchMode,
+                                        isStreamingEnabled = isStreamingEnabled,
+                                        isDynamicModelsEnabled = isDynamicModelsEnabled
                                     )
                                 }
                                 viewModel.resetAndRefreshModels()
@@ -525,7 +619,9 @@ fun SettingsScreen(
                         model = selectedModel,
                         systemInstruction = systemInstructionText.trim(),
                         temperature = temperatureValue,
-                        isWatchMode = isWatchMode
+                        isWatchMode = isWatchMode,
+                        isStreamingEnabled = isStreamingEnabled,
+                        isDynamicModelsEnabled = isDynamicModelsEnabled
                     )
                     Toast.makeText(context, "Настройки успешно сохранены!", Toast.LENGTH_SHORT).show()
                     onBack()

@@ -37,12 +37,58 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     var temperature by mutableStateOf(preferences.temperature)
         private set
 
-    var isWatchMode by mutableStateOf(preferences.isWatchMode)
-        private set
+    // Smartwatch Mode (M99 1:1) state & public controls
+    private val _isWatchMode = mutableStateOf(preferences.isWatchMode)
+    val isWatchMode: Boolean
+        get() = _isWatchMode.value
 
     fun setWatchMode(enabled: Boolean) {
-        isWatchMode = enabled
+        _isWatchMode.value = enabled
         preferences.isWatchMode = enabled
+    }
+
+    fun updateWatchMode(enabled: Boolean) {
+        setWatchMode(enabled)
+    }
+
+    fun toggleWatchMode() {
+        setWatchMode(!isWatchMode)
+    }
+
+    // Streaming mode state & public controls
+    private val _isStreamingEnabled = mutableStateOf(preferences.isStreamingEnabled)
+    val isStreamingEnabled: Boolean
+        get() = _isStreamingEnabled.value
+
+    fun setStreamingEnabled(enabled: Boolean) {
+        _isStreamingEnabled.value = enabled
+        preferences.isStreamingEnabled = enabled
+    }
+
+    fun setStreamMode(enabled: Boolean) {
+        setStreamingEnabled(enabled)
+    }
+
+    fun toggleStreaming() {
+        setStreamingEnabled(!isStreamingEnabled)
+    }
+
+    // Dynamic models state & public controls
+    private val _isDynamicModelsEnabled = mutableStateOf(preferences.isDynamicModelsEnabled)
+    val isDynamicModelsEnabled: Boolean
+        get() = _isDynamicModelsEnabled.value
+
+    fun setDynamicModelsEnabled(enabled: Boolean) {
+        _isDynamicModelsEnabled.value = enabled
+        preferences.isDynamicModelsEnabled = enabled
+    }
+
+    fun setUseDynamicModels(enabled: Boolean) {
+        setDynamicModelsEnabled(enabled)
+    }
+
+    fun toggleDynamicModels() {
+        setDynamicModelsEnabled(!isDynamicModelsEnabled)
     }
 
     val conversations = mutableStateListOf<Conversation>()
@@ -323,27 +369,31 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    @JvmOverloads
     fun saveSettings(
         apiKey: String,
         model: String,
         systemInstruction: String,
         temperature: Float,
-        isWatchMode: Boolean = this.isWatchMode
+        isWatchMode: Boolean = this.isWatchMode,
+        isStreamingEnabled: Boolean = this.isStreamingEnabled,
+        isDynamicModelsEnabled: Boolean = this.isDynamicModelsEnabled
     ) {
         val keyChanged = this.apiKey != apiKey
         this.apiKey = apiKey
         this.selectedModel = model
         this.systemInstruction = systemInstruction
         this.temperature = temperature
-        this.isWatchMode = isWatchMode
+        setWatchMode(isWatchMode)
+        setStreamingEnabled(isStreamingEnabled)
+        setDynamicModelsEnabled(isDynamicModelsEnabled)
 
         preferences.apiKey = apiKey
         preferences.selectedModel = model
         preferences.systemInstruction = systemInstruction
         preferences.temperature = temperature
-        preferences.isWatchMode = isWatchMode
 
-        if (keyChanged && apiKey.isNotBlank()) {
+        if (keyChanged && apiKey.isNotBlank() && this.isDynamicModelsEnabled) {
             refreshModels()
         }
     }

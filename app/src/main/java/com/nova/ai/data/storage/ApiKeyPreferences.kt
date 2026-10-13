@@ -58,6 +58,14 @@ class ApiKeyPreferences(context: Context) {
         get() = prefs.getBoolean(KEY_WATCH_MODE, false)
         set(value) = prefs.edit().putBoolean(KEY_WATCH_MODE, value).apply()
 
+    var isStreamingEnabled: Boolean
+        get() = prefs.getBoolean(KEY_STREAMING_ENABLED, true)
+        set(value) = prefs.edit().putBoolean(KEY_STREAMING_ENABLED, value).apply()
+
+    var isDynamicModelsEnabled: Boolean
+        get() = prefs.getBoolean(KEY_DYNAMIC_MODELS_ENABLED, true)
+        set(value) = prefs.edit().putBoolean(KEY_DYNAMIC_MODELS_ENABLED, value).apply()
+
     var modelsCacheTimestamp: Long
         get() = prefs.getLong(KEY_MODELS_CACHE_TIME, 0L)
         private set(value) = prefs.edit().putLong(KEY_MODELS_CACHE_TIME, value).apply()
@@ -97,6 +105,8 @@ class ApiKeyPreferences(context: Context) {
         private const val KEY_SYSTEM_INSTRUCTION = "system_instruction"
         private const val KEY_TEMPERATURE = "temperature"
         private const val KEY_WATCH_MODE = "smartwatch_mode_enabled"
+        private const val KEY_STREAMING_ENABLED = "gemini_streaming_enabled"
+        private const val KEY_DYNAMIC_MODELS_ENABLED = "gemini_dynamic_models_enabled"
         private const val KEY_MODELS_CACHE_JSON = "models_cache_json"
         private const val KEY_MODELS_CACHE_TIME = "models_cache_time"
     }

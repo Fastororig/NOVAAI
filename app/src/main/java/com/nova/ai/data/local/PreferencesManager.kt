@@ -30,6 +30,14 @@ class PreferencesManager(context: Context) {
         get() = delegate.isWatchMode
         set(value) { delegate.isWatchMode = value }
 
+    var isStreamingEnabled: Boolean
+        get() = delegate.isStreamingEnabled
+        set(value) { delegate.isStreamingEnabled = value }
+
+    var isDynamicModelsEnabled: Boolean
+        get() = delegate.isDynamicModelsEnabled
+        set(value) { delegate.isDynamicModelsEnabled = value }
+
     fun clearCachedModels() = delegate.clearCachedModels()
     fun clearAll() = delegate.clearAll()
 }
