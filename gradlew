@@ -127,12 +127,24 @@ if $darwin; then
     GRADLE_OPTS="$GRADLE_OPTS \"-Xdock:name=$APP_NAME\" \"-Xdock:icon=$APP_HOME/media/gradle.icns\""
 fi
 
-# Download gradle-wrapper.jar if not present
-if [ ! -e "$CLASSPATH" ]; then
-    echo "gradle-wrapper.jar not found, attempting download..."
+# Ensure gradle-wrapper.jar exists
+if [ ! -s "$CLASSPATH" ]; then
+    echo "gradle-wrapper.jar not found or empty, preparing wrapper..."
     mkdir -p "$APP_HOME/gradle/wrapper"
-    curl -sLo "$CLASSPATH" https://raw.githubusercontent.com/gradle/gradle/v8.7.0/gradle/wrapper/gradle-wrapper.jar 2>/dev/null || true
+    if which gradle >/dev/null 2>&1; then
+        (cd "$APP_HOME" && gradle wrapper --gradle-version 8.7 --distribution-type bin 2>/dev/null) || true
+    fi
+    if [ ! -s "$CLASSPATH" ]; then
+        curl -fsSL -o "$CLASSPATH" https://raw.githubusercontent.com/gradle/gradle/v8.7.0/gradle/wrapper/gradle-wrapper.jar 2>/dev/null || \
+        wget -q -O "$CLASSPATH" https://raw.githubusercontent.com/gradle/gradle/v8.7.0/gradle/wrapper/gradle-wrapper.jar 2>/dev/null || true
+    fi
 fi
 
-# Execute Gradle
+if [ ! -s "$CLASSPATH" ] && which gradle >/dev/null 2>&1; then
+    echo "Wrapper jar unavailable; delegating directly to system gradle..."
+    exec gradle "$@"
+fi
+
+# Execute Gradle Wrapper
 exec "$JAVACMD" "-Dorg.gradle.appname=$APP_BASE_NAME" -classpath "$CLASSPATH" org.gradle.wrapper.GradleWrapperMain "$@"
+

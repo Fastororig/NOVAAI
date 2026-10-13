@@ -28,18 +28,39 @@ jobs:
           gradle-version: '8.7'
           cache-disabled: false
 
-      - name: Make Gradlew Executable
+      - name: Generate Gradle Wrapper
         run: |
-          find . -name "gradlew" -exec chmod +x {} +
+          TARGET_DIR="."
+          if [ -d "android" ] && [ -f "android/settings.gradle.kts" ]; then
+            TARGET_DIR="android"
+          fi
+          echo "Android project directory: $TARGET_DIR"
+          cd "$TARGET_DIR"
+
+          # Generate clean Gradle wrapper with binary JAR
+          echo "Generating Gradle wrapper files..."
+          gradle wrapper --gradle-version 8.7 --distribution-type bin
+
+          # Set executable permissions
+          chmod +x gradlew
+
+          echo "Wrapper verification:"
+          ls -la gradlew gradle/wrapper/
 
       - name: Build APK with Gradle
         run: |
-          if [ -d "android" ]; then
-            cd android
+          TARGET_DIR="."
+          if [ -d "android" ] && [ -f "android/settings.gradle.kts" ]; then
+            TARGET_DIR="android"
           fi
-          if [ -f "./gradlew" ]; then
+          cd "$TARGET_DIR"
+
+          # Run build using wrapper, with automatic fallback to installed gradle
+          if [ -f "./gradlew" ] && [ -s "gradle/wrapper/gradle-wrapper.jar" ]; then
+            echo "Building with ./gradlew assembleDebug..."
             ./gradlew assembleDebug --no-daemon --stacktrace
           else
+            echo "Falling back to system gradle assembleDebug..."
             gradle assembleDebug --no-daemon --stacktrace
           fi
 
