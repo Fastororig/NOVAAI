@@ -37,6 +37,14 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     var temperature by mutableStateOf(preferences.temperature)
         private set
 
+    var isWatchMode by mutableStateOf(preferences.isWatchMode)
+        private set
+
+    fun setWatchMode(enabled: Boolean) {
+        isWatchMode = enabled
+        preferences.isWatchMode = enabled
+    }
+
     val conversations = mutableStateListOf<Conversation>()
     var currentConversationId by mutableStateOf("")
         private set
@@ -84,14 +92,23 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private fun loadInitialModels() {
         val cached = preferences.getCachedModels()
         if (!cached.isNullOrEmpty()) {
+            val sanitized = cached.map {
+                it.copy(isRecommended = (it.id == UiGeminiModel.RECOMMENDED_MODEL_ID))
+            }
             modelsList.clear()
-            modelsList.addAll(cached)
+            modelsList.addAll(sanitized)
             isModelsFromCache = true
             modelsLastUpdated = preferences.modelsCacheTimestamp
         } else {
             modelsList.clear()
             modelsList.addAll(UiGeminiModel.INITIAL_FALLBACK)
             isModelsFromCache = true
+        }
+
+        // If saved model is not in the list, auto switch to default stable model
+        if (modelsList.none { it.id == selectedModel }) {
+            selectedModel = UiGeminiModel.DEFAULT_MODEL_ID
+            preferences.selectedModel = UiGeminiModel.DEFAULT_MODEL_ID
         }
 
         if (apiKey.isNotBlank()) {
@@ -101,7 +118,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     fun refreshModels() {
         if (apiKey.isBlank()) {
-            modelsErrorMessage = "Введите API-ключ для загрузки списка моделей через официальный API"
+            modelsErrorMessage = "Недействительный API-ключ. Проверьте правильность ключа в настройках."
             return
         }
 
@@ -121,18 +138,43 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     modelsLastUpdated = preferences.modelsCacheTimestamp
                     modelsErrorMessage = null
 
+                    // If saved model is absent from the loaded list, auto switch to default stable model
                     val modelExists = remoteModels.any { it.id == selectedModel }
                     if (!modelExists) {
-                        val recommended = remoteModels.find { it.isRecommended } ?: remoteModels.first()
-                        selectedModel = recommended.id
-                        preferences.selectedModel = recommended.id
+                        val fallback = remoteModels.find { it.id == UiGeminiModel.DEFAULT_MODEL_ID }
+                            ?: remoteModels.find { it.isRecommended }
+                            ?: remoteModels.first()
+                        selectedModel = fallback.id
+                        preferences.selectedModel = fallback.id
                     }
                 }
             }.onFailure { error ->
                 isModelsFromCache = true
-                modelsErrorMessage = "Ошибка обновления: ${error.localizedMessage ?: "Не удалось загрузить список"}. Используется сохраненный кэш."
+                if (modelsList.isEmpty()) {
+                    modelsList.addAll(UiGeminiModel.INITIAL_FALLBACK)
+                }
+                if (modelsList.none { it.id == selectedModel }) {
+                    selectedModel = UiGeminiModel.DEFAULT_MODEL_ID
+                    preferences.selectedModel = UiGeminiModel.DEFAULT_MODEL_ID
+                }
+                modelsErrorMessage = error.localizedMessage ?: "Не удалось загрузить список. Используется резервный список моделей."
             }
         }
+    }
+
+    /**
+     * Clears local models cache in preferences and re-fetches a clean list from API.
+     */
+    fun resetAndRefreshModels() {
+        preferences.clearCachedModels()
+        modelsList.clear()
+        modelsList.addAll(UiGeminiModel.INITIAL_FALLBACK)
+        isModelsFromCache = true
+        modelsLastUpdated = 0L
+        modelsErrorMessage = null
+        selectedModel = UiGeminiModel.DEFAULT_MODEL_ID
+        preferences.selectedModel = UiGeminiModel.DEFAULT_MODEL_ID
+        refreshModels()
     }
 
     // ==========================================
@@ -285,18 +327,21 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         apiKey: String,
         model: String,
         systemInstruction: String,
-        temperature: Float
+        temperature: Float,
+        isWatchMode: Boolean = this.isWatchMode
     ) {
         val keyChanged = this.apiKey != apiKey
         this.apiKey = apiKey
         this.selectedModel = model
         this.systemInstruction = systemInstruction
         this.temperature = temperature
+        this.isWatchMode = isWatchMode
 
         preferences.apiKey = apiKey
         preferences.selectedModel = model
         preferences.systemInstruction = systemInstruction
         preferences.temperature = temperature
+        preferences.isWatchMode = isWatchMode
 
         if (keyChanged && apiKey.isNotBlank()) {
             refreshModels()
@@ -379,13 +424,32 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 conv.messages[msgIndex] = userMessage.copy(attachments = finalAttachments)
             }
 
-            val result = apiService.generateContent(
+            var result = apiService.generateContent(
                 apiKey = apiKey,
                 model = selectedModel,
                 conversationHistory = conv.messages,
                 systemInstruction = systemInstruction.ifBlank { null },
                 temperature = temperature
             )
+
+            // If model returned an error (e.g. 404/400 model unavailable) and is not already the default model,
+            // automatically switch to the default stable model (gemini-2.5-flash) and retry
+            if (result.isFailure && selectedModel != UiGeminiModel.DEFAULT_MODEL_ID) {
+                val ex = result.exceptionOrNull()
+                val isModelError = (ex is com.nova.ai.data.api.ApiException && (ex.code == 404 || ex.code == 400)) ||
+                        ex?.message?.contains("недоступна", ignoreCase = true) == true
+                if (isModelError) {
+                    selectedModel = UiGeminiModel.DEFAULT_MODEL_ID
+                    preferences.selectedModel = UiGeminiModel.DEFAULT_MODEL_ID
+                    result = apiService.generateContent(
+                        apiKey = apiKey,
+                        model = selectedModel,
+                        conversationHistory = conv.messages,
+                        systemInstruction = systemInstruction.ifBlank { null },
+                        temperature = temperature
+                    )
+                }
+            }
 
             isLoading = false
 

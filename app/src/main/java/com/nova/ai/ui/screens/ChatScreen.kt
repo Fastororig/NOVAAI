@@ -7,7 +7,6 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import android.graphics.BitmapFactory
-import android.net.Uri
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -32,6 +31,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -58,6 +58,7 @@ fun ChatScreen(
     val currentModel = viewModel.selectedModel
     val isKeyConfigured = viewModel.apiKey.isNotBlank()
     val attachedFiles = viewModel.attachedFiles
+    val isWatchMode = viewModel.isWatchMode
 
     var inputText by remember { mutableStateOf("") }
 
@@ -79,54 +80,139 @@ fun ChatScreen(
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = {
-                    Column {
-                        Text(
-                            text = currentConversation?.title ?: "Nova AI",
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = TextPrimary,
-                            maxLines = 1
-                        )
-                        Text(
-                            text = currentModel,
-                            fontSize = 12.sp,
-                            color = NovaPrimary,
-                            maxLines = 1
-                        )
+            if (isWatchMode) {
+                // Ultra-compact Micro-TopBar for Square Smartwatch Screens (M99 1:1)
+                // Watch Mode: Compact 1:1 square screen Top Bar with >= 48dp touch targets
+                Surface(
+                    color = DarkSurface,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .statusBarsPadding()
+                        .height(52.dp),
+                    border = androidx.compose.foundation.BorderStroke(0.5.dp, DarkBorder)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(horizontal = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        // Navigation drawer button (min 48dp touch target)
+                        IconButton(
+                            onClick = onOpenDrawer,
+                            modifier = Modifier.size(48.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Menu,
+                                contentDescription = "Меню диалогов",
+                                tint = TextPrimary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            modifier = Modifier.weight(1f, fill = false)
+                        ) {
+                            Text(
+                                text = "Nova",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = TextPrimary
+                            )
+                            Text(
+                                text = "• " + currentModel.substringAfterLast("/").replace("gemini-", ""),
+                                fontSize = 10.sp,
+                                color = NovaPrimary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(2.dp)
+                        ) {
+                            // New conversation button (min 48dp touch target)
+                            IconButton(
+                                onClick = { viewModel.createNewConversation() },
+                                modifier = Modifier.size(48.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.AddComment,
+                                    contentDescription = "Новый диалог",
+                                    tint = TextSecondary,
+                                    modifier = Modifier.size(19.dp)
+                                )
+                            }
+                            // Settings button (min 48dp touch target)
+                            IconButton(
+                                onClick = onOpenSettings,
+                                modifier = Modifier.size(48.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Settings,
+                                    contentDescription = "Настройки",
+                                    tint = TextSecondary,
+                                    modifier = Modifier.size(19.dp)
+                                )
+                            }
+                        }
                     }
-                },
-                navigationIcon = {
-                    IconButton(onClick = onOpenDrawer) {
-                        Icon(
-                            imageVector = Icons.Default.Menu,
-                            contentDescription = "Меню диалогов",
-                            tint = TextPrimary
-                        )
-                    }
-                },
-                actions = {
-                    IconButton(onClick = { viewModel.createNewConversation() }) {
-                        Icon(
-                            imageVector = Icons.Default.AddComment,
-                            contentDescription = "Новый диалог",
-                            tint = TextSecondary
-                        )
-                    }
-                    IconButton(onClick = onOpenSettings) {
-                        Icon(
-                            imageVector = Icons.Default.Settings,
-                            contentDescription = "Настройки",
-                            tint = TextSecondary
-                        )
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = DarkSurface,
-                    titleContentColor = TextPrimary
+                }
+            } else {
+                // Standard Smartphone TopAppBar
+                TopAppBar(
+                    title = {
+                        Column {
+                            Text(
+                                text = currentConversation?.title ?: "Nova AI",
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = TextPrimary,
+                                maxLines = 1
+                            )
+                            Text(
+                                text = currentModel,
+                                fontSize = 12.sp,
+                                color = NovaPrimary,
+                                maxLines = 1
+                            )
+                        }
+                    },
+                    navigationIcon = {
+                        IconButton(onClick = onOpenDrawer) {
+                            Icon(
+                                imageVector = Icons.Default.Menu,
+                                contentDescription = "Меню диалогов",
+                                tint = TextPrimary
+                            )
+                        }
+                    },
+                    actions = {
+                        IconButton(onClick = { viewModel.createNewConversation() }) {
+                            Icon(
+                                imageVector = Icons.Default.AddComment,
+                                contentDescription = "Новый диалог",
+                                tint = TextSecondary
+                            )
+                        }
+                        IconButton(onClick = onOpenSettings) {
+                            Icon(
+                                imageVector = Icons.Default.Settings,
+                                contentDescription = "Настройки",
+                                tint = TextSecondary
+                            )
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = DarkSurface,
+                        titleContentColor = TextPrimary
+                    )
                 )
-            )
+            }
         },
         containerColor = DarkBackground
     ) { padding ->
@@ -144,77 +230,89 @@ fun ChatScreen(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 10.dp),
+                            .padding(
+                                horizontal = if (isWatchMode) 8.dp else 16.dp,
+                                vertical = if (isWatchMode) 6.dp else 10.dp
+                            ),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Row(
                             modifier = Modifier.weight(1f),
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Warning,
                                 contentDescription = null,
                                 tint = WarningColor,
-                                modifier = Modifier.size(20.dp)
+                                modifier = Modifier.size(if (isWatchMode) 16.dp else 20.dp)
                             )
                             Text(
-                                text = "API-ключ не настроен",
+                                text = if (isWatchMode) "Нет API-ключа" else "API-ключ не настроен",
                                 color = TextPrimary,
-                                fontSize = 13.sp,
+                                fontSize = if (isWatchMode) 11.sp else 13.sp,
                                 fontWeight = FontWeight.Medium
                             )
                         }
                         TextButton(
                             onClick = onOpenSettings,
-                            colors = ButtonDefaults.textButtonColors(contentColor = NovaPrimary)
+                            colors = ButtonDefaults.textButtonColors(contentColor = NovaPrimary),
+                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
                         ) {
-                            Text("Ввести ключ", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                            Text(
+                                text = "Ввести",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = if (isWatchMode) 11.sp else 13.sp
+                            )
                         }
                     }
                 }
             }
 
-            // Message List
+            // Message List Area
             if (messages.isEmpty()) {
                 Box(
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxWidth()
-                        .padding(24.dp),
+                        .padding(if (isWatchMode) 10.dp else 24.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                        verticalArrangement = Arrangement.spacedBy(if (isWatchMode) 6.dp else 12.dp)
                     ) {
                         Surface(
                             shape = CircleShape,
                             color = NovaPrimary.copy(alpha = 0.15f),
-                            modifier = Modifier.size(64.dp)
+                            modifier = Modifier.size(if (isWatchMode) 38.dp else 64.dp)
                         ) {
                             Box(contentAlignment = Alignment.Center) {
                                 Icon(
                                     imageVector = Icons.Default.AutoAwesome,
                                     contentDescription = null,
                                     tint = NovaPrimary,
-                                    modifier = Modifier.size(32.dp)
+                                    modifier = Modifier.size(if (isWatchMode) 20.dp else 32.dp)
                                 )
                             }
                         }
                         Text(
-                            text = "Чем я могу помочь вам сегодня?",
-                            fontSize = 17.sp,
+                            text = if (isWatchMode) "Nova AI (Часы M99)" else "Чем я могу помочь вам сегодня?",
+                            fontSize = if (isWatchMode) 13.sp else 17.sp,
                             fontWeight = FontWeight.SemiBold,
                             color = TextPrimary
                         )
                         Text(
-                            text = "Отправляйте запросы и прикрепляйте файлы (изображения, PDF, документы, аудио, видео). Все запросы идут напрямую в Google Gemini API.",
-                            fontSize = 13.sp,
+                            text = if (isWatchMode)
+                                "Задайте вопрос голосом или текстом. Поддерживаются файлы и фото."
+                            else
+                                "Отправляйте запросы и прикрепляйте файлы (изображения, PDF, документы, аудио, видео). Все запросы идут напрямую в Google Gemini API.",
+                            fontSize = if (isWatchMode) 11.sp else 13.sp,
                             color = TextSecondary,
-                            lineHeight = 18.sp,
-                            modifier = Modifier.padding(horizontal = 16.dp)
+                            lineHeight = if (isWatchMode) 15.sp else 18.sp,
+                            modifier = Modifier.padding(horizontal = if (isWatchMode) 4.dp else 16.dp),
+                            textAlign = TextAlign.Center
                         )
                     }
                 }
@@ -224,12 +322,16 @@ fun ChatScreen(
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                        .padding(
+                            horizontal = if (isWatchMode) 6.dp else 12.dp,
+                            vertical = if (isWatchMode) 4.dp else 8.dp
+                        ),
+                    verticalArrangement = Arrangement.spacedBy(if (isWatchMode) 8.dp else 12.dp)
                 ) {
                     items(messages, key = { it.id }) { message ->
                         MessageBubble(
                             message = message,
+                            isWatchMode = isWatchMode,
                             onCopy = {
                                 val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                                 val clip = ClipData.newPlainText("Nova AI", message.text)
@@ -247,35 +349,35 @@ fun ChatScreen(
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(vertical = 8.dp),
+                                    .padding(vertical = if (isWatchMode) 4.dp else 8.dp),
                                 horizontalArrangement = Arrangement.Start,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Surface(
                                     shape = CircleShape,
                                     color = DarkSurfaceVariant,
-                                    modifier = Modifier.size(28.dp)
+                                    modifier = Modifier.size(if (isWatchMode) 22.dp else 28.dp)
                                 ) {
                                     Box(contentAlignment = Alignment.Center) {
                                         Icon(
                                             imageVector = Icons.Default.AutoAwesome,
                                             contentDescription = null,
                                             tint = NovaPrimary,
-                                            modifier = Modifier.size(16.dp)
+                                            modifier = Modifier.size(if (isWatchMode) 12.dp else 16.dp)
                                         )
                                     }
                                 }
-                                Spacer(modifier = Modifier.width(8.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
                                 CircularProgressIndicator(
-                                    modifier = Modifier.size(18.dp),
+                                    modifier = Modifier.size(if (isWatchMode) 14.dp else 18.dp),
                                     color = NovaPrimary,
                                     strokeWidth = 2.dp
                                 )
-                                Spacer(modifier = Modifier.width(8.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
                                 Text(
                                     text = "Nova думает...",
                                     color = TextSecondary,
-                                    fontSize = 13.sp
+                                    fontSize = if (isWatchMode) 11.sp else 13.sp
                                 )
                             }
                         }
@@ -292,25 +394,25 @@ fun ChatScreen(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                            .padding(horizontal = 8.dp, vertical = 5.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Text(
                             text = err,
                             color = Color(0xFFFF8599),
-                            fontSize = 12.sp,
+                            fontSize = if (isWatchMode) 10.sp else 12.sp,
                             modifier = Modifier.weight(1f)
                         )
                         IconButton(
                             onClick = { viewModel.clearAttachments() },
-                            modifier = Modifier.size(20.dp)
+                            modifier = Modifier.size(18.dp)
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Close,
                                 contentDescription = "Закрыть",
                                 tint = Color(0xFFFF8599),
-                                modifier = Modifier.size(14.dp)
+                                modifier = Modifier.size(12.dp)
                             )
                         }
                     }
@@ -328,13 +430,17 @@ fun ChatScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .horizontalScroll(rememberScrollState())
-                            .padding(horizontal = 10.dp, vertical = 8.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            .padding(
+                                horizontal = if (isWatchMode) 6.dp else 10.dp,
+                                vertical = if (isWatchMode) 4.dp else 8.dp
+                            ),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         attachedFiles.forEach { file ->
                             AttachmentChip(
                                 file = file,
+                                isWatchMode = isWatchMode,
                                 onRemove = { viewModel.removeAttachment(file.id) }
                             )
                         }
@@ -342,43 +448,57 @@ fun ChatScreen(
                 }
             }
 
-            // Bottom Input Bar
+            // Bottom Input Bar — Large, Finger-Friendly Targets for Smartwatches
             Surface(
                 color = DarkSurface,
                 modifier = Modifier.fillMaxWidth(),
-                tonalElevation = 4.dp
+                tonalElevation = 4.dp,
+                border = if (isWatchMode) androidx.compose.foundation.BorderStroke(0.5.dp, DarkBorder) else null
             ) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                        .padding(
+                            horizontal = if (isWatchMode) 6.dp else 10.dp,
+                            vertical = if (isWatchMode) 6.dp else 8.dp
+                        ),
                     verticalAlignment = Alignment.Bottom,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(if (isWatchMode) 6.dp else 8.dp)
                 ) {
-                    // Paperclip Attachment Button
+                    // Paperclip Attachment Button (Large touch target)
                     IconButton(
                         onClick = { filePickerLauncher.launch("*/*") },
                         enabled = !isLoading,
                         modifier = Modifier
-                            .size(46.dp)
-                            .clip(CircleShape)
+                            .size(if (isWatchMode) 48.dp else 46.dp)
+                            .clip(if (isWatchMode) RoundedCornerShape(14.dp) else CircleShape)
                             .background(Color(0xFF0D1322))
                     ) {
                         Icon(
                             imageVector = Icons.Default.AttachFile,
                             contentDescription = "Прикрепить файлы",
                             tint = if (attachedFiles.isNotEmpty()) NovaPrimary else TextSecondary,
-                            modifier = Modifier.size(22.dp)
+                            modifier = Modifier.size(if (isWatchMode) 22.dp else 22.dp)
                         )
                     }
 
+                    // Input TextField
                     OutlinedTextField(
                         value = inputText,
                         onValueChange = { inputText = it },
                         modifier = Modifier
                             .weight(1f)
-                            .heightIn(min = 46.dp, max = 140.dp),
-                        placeholder = { Text("Спросите что-нибудь...", color = TextMuted) },
+                            .heightIn(
+                                min = if (isWatchMode) 48.dp else 46.dp,
+                                max = if (isWatchMode) 100.dp else 140.dp
+                            ),
+                        placeholder = {
+                            Text(
+                                text = if (isWatchMode) "Спросите..." else "Спросите что-нибудь...",
+                                color = TextMuted,
+                                fontSize = if (isWatchMode) 13.sp else 14.sp
+                            )
+                        },
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedTextColor = TextPrimary,
                             unfocusedTextColor = TextPrimary,
@@ -387,12 +507,13 @@ fun ChatScreen(
                             focusedContainerColor = Color(0xFF0D1322),
                             unfocusedContainerColor = Color(0xFF0D1322)
                         ),
-                        shape = RoundedCornerShape(20.dp),
-                        maxLines = 5
+                        shape = RoundedCornerShape(if (isWatchMode) 14.dp else 20.dp),
+                        maxLines = if (isWatchMode) 3 else 5
                     )
 
                     val canSend = (inputText.isNotBlank() || attachedFiles.isNotEmpty()) && !isLoading
 
+                    // Send Button (Large 48-50dp button, comfortable for finger press on watch)
                     IconButton(
                         onClick = {
                             if (canSend) {
@@ -403,15 +524,15 @@ fun ChatScreen(
                         },
                         enabled = canSend,
                         modifier = Modifier
-                            .size(46.dp)
-                            .clip(CircleShape)
+                            .size(if (isWatchMode) 50.dp else 46.dp)
+                            .clip(if (isWatchMode) RoundedCornerShape(14.dp) else CircleShape)
                             .background(if (canSend) NovaPrimary else DarkSurfaceVariant)
                     ) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.Send,
                             contentDescription = "Отправить",
                             tint = if (canSend) Color.Black else TextMuted,
-                            modifier = Modifier.size(20.dp)
+                            modifier = Modifier.size(if (isWatchMode) 24.dp else 20.dp)
                         )
                     }
                 }
@@ -423,17 +544,21 @@ fun ChatScreen(
 @Composable
 private fun AttachmentChip(
     file: AttachmentInfo,
+    isWatchMode: Boolean = false,
     onRemove: () -> Unit
 ) {
     Surface(
         color = Color(0xFF1E293B),
-        shape = RoundedCornerShape(10.dp),
+        shape = RoundedCornerShape(8.dp),
         border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF334155))
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+            modifier = Modifier.padding(
+                horizontal = if (isWatchMode) 6.dp else 8.dp,
+                vertical = if (isWatchMode) 4.dp else 6.dp
+            ),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             if (file.isImage && !file.base64Data.isNullOrBlank()) {
                 val imageBitmap = remember(file.base64Data) {
@@ -449,8 +574,8 @@ private fun AttachmentChip(
                         bitmap = imageBitmap,
                         contentDescription = file.name,
                         modifier = Modifier
-                            .size(24.dp)
-                            .clip(RoundedCornerShape(4.dp)),
+                            .size(if (isWatchMode) 20.dp else 24.dp)
+                            .clip(RoundedCornerShape(3.dp)),
                         contentScale = ContentScale.Crop
                     )
                 } else {
@@ -458,7 +583,7 @@ private fun AttachmentChip(
                         imageVector = Icons.Default.Image,
                         contentDescription = null,
                         tint = NovaPrimary,
-                        modifier = Modifier.size(16.dp)
+                        modifier = Modifier.size(if (isWatchMode) 14.dp else 16.dp)
                     )
                 }
             } else {
@@ -472,34 +597,34 @@ private fun AttachmentChip(
                     },
                     contentDescription = null,
                     tint = NovaPrimary,
-                    modifier = Modifier.size(16.dp)
+                    modifier = Modifier.size(if (isWatchMode) 14.dp else 16.dp)
                 )
             }
 
-            Column(modifier = Modifier.widthIn(max = 120.dp)) {
+            Column(modifier = Modifier.widthIn(max = if (isWatchMode) 80.dp else 120.dp)) {
                 Text(
                     text = file.name,
-                    fontSize = 11.sp,
+                    fontSize = if (isWatchMode) 10.sp else 11.sp,
                     color = TextPrimary,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
                 Text(
                     text = formatFileSize(file.sizeBytes),
-                    fontSize = 9.sp,
+                    fontSize = if (isWatchMode) 8.sp else 9.sp,
                     color = TextSecondary
                 )
             }
 
             IconButton(
                 onClick = onRemove,
-                modifier = Modifier.size(18.dp)
+                modifier = Modifier.size(if (isWatchMode) 16.dp else 18.dp)
             ) {
                 Icon(
                     imageVector = Icons.Default.Close,
                     contentDescription = "Удалить файл",
                     tint = TextMuted,
-                    modifier = Modifier.size(12.dp)
+                    modifier = Modifier.size(if (isWatchMode) 10.dp else 12.dp)
                 )
             }
         }
@@ -509,6 +634,7 @@ private fun AttachmentChip(
 @Composable
 private fun MessageBubble(
     message: ChatMessage,
+    isWatchMode: Boolean = false,
     onCopy: () -> Unit,
     onRetry: () -> Unit
 ) {
@@ -520,10 +646,13 @@ private fun MessageBubble(
         horizontalAlignment = if (isUser) Alignment.End else Alignment.Start
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth(if (isUser) 0.88f else 0.96f),
+            modifier = Modifier.fillMaxWidth(
+                if (isWatchMode) 0.98f else (if (isUser) 0.88f else 0.96f)
+            ),
             horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start
         ) {
-            if (!isUser) {
+            // In watch mode, keep avatars ultra-compact so text gets maximal width
+            if (!isUser && !isWatchMode) {
                 Surface(
                     shape = CircleShape,
                     color = if (isError) ErrorColor.copy(alpha = 0.2f) else DarkSurfaceVariant,
@@ -548,10 +677,10 @@ private fun MessageBubble(
                     modifier = Modifier
                         .clip(
                             RoundedCornerShape(
-                                topStart = 16.dp,
-                                topEnd = 16.dp,
-                                bottomStart = if (isUser) 16.dp else 4.dp,
-                                bottomEnd = if (isUser) 4.dp else 16.dp
+                                topStart = if (isWatchMode) 12.dp else 16.dp,
+                                topEnd = if (isWatchMode) 12.dp else 16.dp,
+                                bottomStart = if (isUser) (if (isWatchMode) 12.dp else 16.dp) else 4.dp,
+                                bottomEnd = if (isUser) 4.dp else (if (isWatchMode) 12.dp else 16.dp)
                             )
                         )
                         .background(
@@ -569,22 +698,25 @@ private fun MessageBubble(
                                 else -> DarkBorder
                             },
                             shape = RoundedCornerShape(
-                                topStart = 16.dp,
-                                topEnd = 16.dp,
-                                bottomStart = if (isUser) 16.dp else 4.dp,
-                                bottomEnd = if (isUser) 4.dp else 16.dp
+                                topStart = if (isWatchMode) 12.dp else 16.dp,
+                                topEnd = if (isWatchMode) 12.dp else 16.dp,
+                                bottomStart = if (isUser) (if (isWatchMode) 12.dp else 16.dp) else 4.dp,
+                                bottomEnd = if (isUser) 4.dp else (if (isWatchMode) 12.dp else 16.dp)
                             )
                         )
-                        .padding(horizontal = 14.dp, vertical = 10.dp)
+                        .padding(
+                            horizontal = if (isWatchMode) 9.dp else 14.dp,
+                            vertical = if (isWatchMode) 7.dp else 10.dp
+                        )
                 ) {
-                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Column(verticalArrangement = Arrangement.spacedBy(if (isWatchMode) 4.dp else 6.dp)) {
                         // Display attachments in user message
                         if (message.attachments.isNotEmpty()) {
                             Row(
-                                 modifier = Modifier
-                                     .fillMaxWidth()
-                                     .horizontalScroll(rememberScrollState()),
-                                 horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
                                 message.attachments.forEach { att ->
                                     Surface(
@@ -592,7 +724,7 @@ private fun MessageBubble(
                                         shape = RoundedCornerShape(6.dp)
                                     ) {
                                         Row(
-                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp),
+                                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 3.dp),
                                             verticalAlignment = Alignment.CenterVertically,
                                             horizontalArrangement = Arrangement.spacedBy(4.dp)
                                         ) {
@@ -607,24 +739,24 @@ private fun MessageBubble(
                                                     Image(
                                                         bitmap = bubbleImg,
                                                         contentDescription = null,
-                                                        modifier = Modifier.size(18.dp).clip(RoundedCornerShape(3.dp)),
+                                                        modifier = Modifier.size(16.dp).clip(RoundedCornerShape(3.dp)),
                                                         contentScale = ContentScale.Crop
                                                     )
                                                 } else {
-                                                    Icon(imageVector = Icons.Default.Image, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
+                                                    Icon(imageVector = Icons.Default.Image, contentDescription = null, tint = Color.White, modifier = Modifier.size(12.dp))
                                                 }
                                             } else {
                                                 Icon(
                                                     imageVector = if (att.isImage) Icons.Default.Image else Icons.Default.AttachFile,
                                                     contentDescription = null,
                                                     tint = Color.White,
-                                                    modifier = Modifier.size(14.dp)
+                                                    modifier = Modifier.size(12.dp)
                                                 )
                                             }
                                             Text(
                                                 text = att.name,
                                                 color = Color.White,
-                                                fontSize = 11.sp,
+                                                fontSize = if (isWatchMode) 10.sp else 11.sp,
                                                 maxLines = 1
                                             )
                                         }
@@ -638,32 +770,32 @@ private fun MessageBubble(
                                 Text(
                                     text = message.text,
                                     color = Color.White,
-                                    fontSize = 15.sp,
-                                    lineHeight = 22.sp
+                                    fontSize = if (isWatchMode) 13.5.sp else 15.sp,
+                                    lineHeight = if (isWatchMode) 18.sp else 22.sp
                                 )
                             }
                         } else if (isError) {
                             Text(
                                 text = message.text,
                                 color = Color(0xFFFF8599),
-                                fontSize = 14.sp,
-                                lineHeight = 20.sp
+                                fontSize = if (isWatchMode) 12.sp else 14.sp,
+                                lineHeight = if (isWatchMode) 16.sp else 20.sp
                             )
                             Button(
                                 onClick = onRetry,
                                 colors = ButtonDefaults.buttonColors(containerColor = ErrorColor),
                                 shape = RoundedCornerShape(6.dp),
-                                modifier = Modifier.height(32.dp),
-                                contentPadding = PaddingValues(horizontal = 10.dp)
+                                modifier = Modifier.height(28.dp),
+                                contentPadding = PaddingValues(horizontal = 8.dp)
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.Refresh,
                                     contentDescription = "Повторить",
                                     tint = Color.White,
-                                    modifier = Modifier.size(14.dp)
+                                    modifier = Modifier.size(12.dp)
                                 )
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("Повторить", fontSize = 12.sp, color = Color.White)
+                                Spacer(modifier = Modifier.width(3.dp))
+                                Text("Повторить", fontSize = 11.sp, color = Color.White)
                             }
                         } else {
                             MarkdownViewer(text = message.text)
@@ -674,26 +806,26 @@ private fun MessageBubble(
                 if (!isUser && !isError) {
                     Row(
                         modifier = Modifier
-                            .padding(top = 4.dp, start = 4.dp),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            .padding(top = 2.dp, start = 2.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         IconButton(
                             onClick = onCopy,
-                            modifier = Modifier.size(24.dp)
+                            modifier = Modifier.size(20.dp)
                         ) {
                             Icon(
                                 imageVector = Icons.Default.ContentCopy,
                                 contentDescription = "Копировать",
                                 tint = TextMuted,
-                                modifier = Modifier.size(14.dp)
+                                modifier = Modifier.size(12.dp)
                             )
                         }
 
                         if (message.modelUsed != null) {
                             Text(
-                                text = message.modelUsed,
-                                fontSize = 11.sp,
+                                text = message.modelUsed.substringAfterLast("/"),
+                                fontSize = if (isWatchMode) 9.sp else 11.sp,
                                 color = TextMuted
                             )
                         }

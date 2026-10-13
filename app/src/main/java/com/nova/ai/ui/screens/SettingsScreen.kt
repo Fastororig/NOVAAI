@@ -43,8 +43,13 @@ fun SettingsScreen(
     var selectedModel by remember { mutableStateOf(viewModel.selectedModel) }
     var systemInstructionText by remember { mutableStateOf(viewModel.systemInstruction) }
     var temperatureValue by remember { mutableFloatStateOf(viewModel.temperature) }
+    var isWatchMode by remember { mutableStateOf(viewModel.isWatchMode) }
 
     val scrollState = rememberScrollState()
+
+    LaunchedEffect(viewModel.selectedModel) {
+        selectedModel = viewModel.selectedModel
+    }
 
     Scaffold(
         topBar = {
@@ -66,7 +71,8 @@ fun SettingsScreen(
                                 apiKey = apiKeyText.trim(),
                                 model = selectedModel,
                                 systemInstruction = systemInstructionText.trim(),
-                                temperature = temperatureValue
+                                temperature = temperatureValue,
+                                isWatchMode = isWatchMode
                             )
                             Toast.makeText(context, "Настройки сохранены", Toast.LENGTH_SHORT).show()
                             onBack()
@@ -95,6 +101,95 @@ fun SettingsScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(20.dp)
         ) {
+            // Smartwatch Mode (M99 1:1) Switch Card
+            Card(
+                colors = CardDefaults.cardColors(
+                    containerColor = if (isWatchMode) Color(0xFF132A4A) else Color(0xFF1E293B)
+                ),
+                shape = RoundedCornerShape(12.dp),
+                border = if (isWatchMode) androidx.compose.foundation.BorderStroke(1.5.dp, NovaPrimary) else null,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(14.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        modifier = Modifier.weight(1f),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Surface(
+                            shape = androidx.compose.foundation.shape.CircleShape,
+                            color = if (isWatchMode) NovaPrimary.copy(alpha = 0.2f) else DarkSurfaceVariant,
+                            modifier = Modifier.size(38.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Default.Watch,
+                                    contentDescription = "Режим смарт-часов",
+                                    tint = if (isWatchMode) NovaPrimary else TextSecondary,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
+
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Text(
+                                    text = "Режим смарт-часов",
+                                    color = TextPrimary,
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                if (isWatchMode) {
+                                    Surface(
+                                        color = NovaPrimary.copy(alpha = 0.2f),
+                                        shape = RoundedCornerShape(4.dp)
+                                    ) {
+                                        Text(
+                                            text = "M99 1:1",
+                                            color = NovaPrimary,
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                        )
+                                    }
+                                }
+                            }
+                            Text(
+                                text = "Ультра-компактная панель, оптимизация для квадратных экранов 1:1 и крупные кнопки для пальцев.",
+                                color = TextSecondary,
+                                fontSize = 12.sp,
+                                lineHeight = 16.sp
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.width(10.dp))
+
+                    Switch(
+                        checked = isWatchMode,
+                        onCheckedChange = { checked ->
+                            isWatchMode = checked
+                            viewModel.setWatchMode(checked)
+                        },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Color.Black,
+                            checkedTrackColor = NovaPrimary,
+                            uncheckedThumbColor = TextMuted,
+                            uncheckedTrackColor = DarkSurfaceVariant
+                        )
+                    )
+                }
+            }
+
             // Security Warning Card
             Card(
                 colors = CardDefaults.cardColors(containerColor = Color(0xFF1E293B)),
@@ -164,59 +259,98 @@ fun SettingsScreen(
 
             // Models Management Section
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column {
-                        Text(
-                            text = "Выбор модели Gemini",
-                            color = TextPrimary,
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Medium
-                        )
-                        Text(
-                            text = "Загружаются из GET /v1beta/models",
-                            color = TextMuted,
-                            fontSize = 11.sp
-                        )
-                    }
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = "Выбор модели Gemini",
+                        color = TextPrimary,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                    Text(
+                        text = "Модели фильтруются по флагу generateContent из GET /v1beta/models",
+                        color = TextMuted,
+                        fontSize = 11.sp
+                    )
 
-                    // Refresh models button
-                    FilledTonalButton(
-                        onClick = {
-                            if (apiKeyText.isNotBlank()) {
-                                viewModel.saveSettings(
-                                    apiKey = apiKeyText.trim(),
-                                    model = selectedModel,
-                                    systemInstruction = systemInstructionText.trim(),
-                                    temperature = temperatureValue
-                                )
-                            }
-                            viewModel.refreshModels()
-                        },
-                        enabled = !viewModel.isLoadingModels,
-                        shape = RoundedCornerShape(8.dp),
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        if (viewModel.isLoadingModels) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(16.dp),
-                                color = NovaPrimary,
-                                strokeWidth = 2.dp
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Загрузка...", fontSize = 12.sp)
-                        } else {
+                        // Refresh models button
+                        FilledTonalButton(
+                            onClick = {
+                                if (apiKeyText.isNotBlank()) {
+                                    viewModel.saveSettings(
+                                        apiKey = apiKeyText.trim(),
+                                        model = selectedModel,
+                                        systemInstruction = systemInstructionText.trim(),
+                                        temperature = temperatureValue,
+                                        isWatchMode = isWatchMode
+                                    )
+                                }
+                                viewModel.refreshModels()
+                            },
+                            enabled = !viewModel.isLoadingModels,
+                            modifier = Modifier
+                                .weight(1f)
+                                .heightIn(min = 44.dp),
+                            shape = RoundedCornerShape(8.dp),
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp)
+                        ) {
+                            if (viewModel.isLoadingModels) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(16.dp),
+                                    color = NovaPrimary,
+                                    strokeWidth = 2.dp
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Загрузка...", fontSize = 12.sp)
+                            } else {
+                                Icon(
+                                    imageVector = Icons.Default.Refresh,
+                                    contentDescription = "Обновить",
+                                    modifier = Modifier.size(16.dp),
+                                    tint = NovaPrimary
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Обновить", fontSize = 12.sp)
+                            }
+                        }
+
+                        // Reset and Refresh models button
+                        OutlinedButton(
+                            onClick = {
+                                if (apiKeyText.isNotBlank()) {
+                                    viewModel.saveSettings(
+                                        apiKey = apiKeyText.trim(),
+                                        model = selectedModel,
+                                        systemInstruction = systemInstructionText.trim(),
+                                        temperature = temperatureValue,
+                                        isWatchMode = isWatchMode
+                                    )
+                                }
+                                viewModel.resetAndRefreshModels()
+                                Toast.makeText(context, "Кэш моделей очищен, загружается свежий список", Toast.LENGTH_SHORT).show()
+                            },
+                            enabled = !viewModel.isLoadingModels,
+                            modifier = Modifier
+                                .weight(1.3f)
+                                .heightIn(min = 44.dp),
+                            shape = RoundedCornerShape(8.dp),
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                contentColor = NovaPrimary
+                            ),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, NovaPrimary.copy(alpha = 0.5f))
+                        ) {
                             Icon(
-                                imageVector = Icons.Default.Refresh,
-                                contentDescription = "Обновить",
+                                imageVector = Icons.Default.Restore,
+                                contentDescription = "Сбросить и обновить",
                                 modifier = Modifier.size(16.dp),
                                 tint = NovaPrimary
                             )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Обновить список", fontSize = 12.sp)
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Сбросить и обновить", fontSize = 11.sp, maxLines = 1)
                         }
                     }
                 }
@@ -390,7 +524,8 @@ fun SettingsScreen(
                         apiKey = apiKeyText.trim(),
                         model = selectedModel,
                         systemInstruction = systemInstructionText.trim(),
-                        temperature = temperatureValue
+                        temperature = temperatureValue,
+                        isWatchMode = isWatchMode
                     )
                     Toast.makeText(context, "Настройки успешно сохранены!", Toast.LENGTH_SHORT).show()
                     onBack()
@@ -458,7 +593,7 @@ private fun ModelFamilySection(
                                 fontWeight = FontWeight.SemiBold,
                                 fontSize = 14.sp
                             )
-                            if (model.isRecommended) {
+                            if (model.isRecommended && model.id == UiGeminiModel.RECOMMENDED_MODEL_ID) {
                                 Surface(
                                     color = NovaPrimary.copy(alpha = 0.2f),
                                     shape = RoundedCornerShape(4.dp)

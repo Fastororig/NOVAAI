@@ -177,6 +177,9 @@ data class UiGeminiModel(
     val isRecommended: Boolean = false
 ) {
     companion object {
+        const val RECOMMENDED_MODEL_ID = "gemini-3.1-flash-lite"
+        const val DEFAULT_MODEL_ID = "gemini-2.5-flash"
+
         fun fromRemote(item: GeminiRemoteModelItem, isRecommended: Boolean = false): UiGeminiModel {
             val id = item.cleanId
             val nameLower = (item.displayName ?: id).lowercase()
@@ -185,6 +188,8 @@ data class UiGeminiModel(
                 nameLower.contains("pro") -> ModelFamily.PRO
                 else -> ModelFamily.OTHER
             }
+            // Strict recommendation check: only gemini-3.1-flash-lite can have isRecommended = true
+            val strictlyRecommended = isRecommended && id == RECOMMENDED_MODEL_ID
             return UiGeminiModel(
                 id = id,
                 displayName = item.displayName ?: id,
@@ -192,17 +197,24 @@ data class UiGeminiModel(
                 family = family,
                 inputTokenLimit = item.inputTokenLimit,
                 outputTokenLimit = item.outputTokenLimit,
-                isRecommended = isRecommended
+                isRecommended = strictlyRecommended
             )
         }
 
         val INITIAL_FALLBACK = listOf(
             UiGeminiModel(
-                id = "gemini-2.5-flash",
-                displayName = "Gemini 2.5 Flash",
-                description = "Новейшая быстрая и умная модель для повседневных задач",
+                id = RECOMMENDED_MODEL_ID,
+                displayName = "Gemini 3.1 Flash-Lite",
+                description = "Рекомендуемая стабильная модель. Высокая скорость генерации, экономичность и надежность",
                 family = ModelFamily.FLASH,
                 isRecommended = true
+            ),
+            UiGeminiModel(
+                id = DEFAULT_MODEL_ID,
+                displayName = "Gemini 2.5 Flash",
+                description = "Базовая стабильная модель по умолчанию. Новейшая быстрая и умная для повседневных задач",
+                family = ModelFamily.FLASH,
+                isRecommended = false
             ),
             UiGeminiModel(
                 id = "gemini-2.5-pro",

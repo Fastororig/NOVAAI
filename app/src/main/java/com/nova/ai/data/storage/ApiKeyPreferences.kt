@@ -8,6 +8,12 @@ import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import com.nova.ai.data.model.UiGeminiModel
 
+/**
+ * Preferences manager supporting both regular smartphone and smartwatch (M99 square 1:1) modes.
+ * Compatible with Android 7.0 (API 24+) with secure keystore fallback.
+ */
+typealias PreferencesManager = ApiKeyPreferences
+
 class ApiKeyPreferences(context: Context) {
 
     private val gson = Gson()
@@ -43,6 +49,15 @@ class ApiKeyPreferences(context: Context) {
         get() = prefs.getFloat(KEY_TEMPERATURE, 0.7f)
         set(value) = prefs.edit().putFloat(KEY_TEMPERATURE, value).apply()
 
+    /**
+     * Smartwatch Mode (M99 square 1:1 aspect ratio)
+     * Compresses TopAppBar into a micro-bar, optimizes padding for small square displays,
+     * enlarges touch targets for fingers.
+     */
+    var isWatchMode: Boolean
+        get() = prefs.getBoolean(KEY_WATCH_MODE, false)
+        set(value) = prefs.edit().putBoolean(KEY_WATCH_MODE, value).apply()
+
     var modelsCacheTimestamp: Long
         get() = prefs.getLong(KEY_MODELS_CACHE_TIME, 0L)
         private set(value) = prefs.edit().putLong(KEY_MODELS_CACHE_TIME, value).apply()
@@ -65,6 +80,13 @@ class ApiKeyPreferences(context: Context) {
         }
     }
 
+    fun clearCachedModels() {
+        prefs.edit()
+            .remove(KEY_MODELS_CACHE_JSON)
+            .remove(KEY_MODELS_CACHE_TIME)
+            .apply()
+    }
+
     fun clearAll() {
         prefs.edit().clear().apply()
     }
@@ -74,6 +96,7 @@ class ApiKeyPreferences(context: Context) {
         private const val KEY_MODEL = "gemini_model"
         private const val KEY_SYSTEM_INSTRUCTION = "system_instruction"
         private const val KEY_TEMPERATURE = "temperature"
+        private const val KEY_WATCH_MODE = "smartwatch_mode_enabled"
         private const val KEY_MODELS_CACHE_JSON = "models_cache_json"
         private const val KEY_MODELS_CACHE_TIME = "models_cache_time"
     }
