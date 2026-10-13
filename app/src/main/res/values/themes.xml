@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Base application theme. Uses standard AppCompat / Material3 dark theme with dark status bar for Android 7.0+ -->
+    <style name="Theme.NovaAI" parent="android:Theme.Material.NoActionBar">
+        <item name="android:statusBarColor">#0B0F19</item>
+        <item name="android:navigationBarColor">#0B0F19</item>
+        <item name="android:windowBackground">#0B0F19</item>
+        <item name="android:textColor">#F8FAFC</item>
+    </style>
+</resources>

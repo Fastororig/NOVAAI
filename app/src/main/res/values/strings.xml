@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Nova AI</string>
+    <string name="chat_title">Nova AI Client</string>
+    <string name="input_hint">Спросите что-нибудь...</string>
+    <string name="send">Отправить</string>
+    <string name="settings">Настройки</string>
+    <string name="api_key_label">Google Gemini API Key</string>
+    <string name="api_key_hint">AIzaSy...</string>
+    <string name="model_label">Модель</string>
+    <string name="system_prompt_label">Системная инструкция (System Prompt)</string>
+    <string name="new_chat">Новый чат</string>
+    <string name="copy">Скопировать</string>
+    <string name="copied">Скопировано в буфер обмена</string>
+    <string name="clear_history">Очистить историю</string>
+    <string name="save">Сохранить</string>
+    <string name="warning_api_key">Внимание: ваш API-ключ хранится только локально в зашифрованном хранилище приложения и передается исключительно напрямую на официальные серверы Google (generativelanguage.googleapis.com). Никогда не передавайте ключ третьим лицам.</string>
+</resources>
