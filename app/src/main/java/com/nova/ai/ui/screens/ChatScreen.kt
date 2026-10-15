@@ -803,7 +803,7 @@ private fun MessageBubble(
                                     )
                                 }
                             } else {
-                                MarkdownViewer(text = message.text)
+                                MarkdownViewer(text = message.text, isWatchMode = isWatchMode)
                                 if (message.isPending) {
                                     Box(
                                         modifier = Modifier
