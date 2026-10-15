@@ -46,6 +46,7 @@ fun SettingsScreen(
     var isWatchMode by remember { mutableStateOf(viewModel.isWatchMode) }
     var isStreamingEnabled by remember { mutableStateOf(viewModel.isStreamingEnabled) }
     var isDynamicModelsEnabled by remember { mutableStateOf(viewModel.isDynamicModelsEnabled) }
+    var proxyUrlText by remember { mutableStateOf(viewModel.proxyUrl) }
 
     val scrollState = rememberScrollState()
 
@@ -76,7 +77,8 @@ fun SettingsScreen(
                                 temperature = temperatureValue,
                                 isWatchMode = isWatchMode,
                                 isStreamingEnabled = isStreamingEnabled,
-                                isDynamicModelsEnabled = isDynamicModelsEnabled
+                                isDynamicModelsEnabled = isDynamicModelsEnabled,
+                                proxyUrl = proxyUrlText.trim()
                             )
                             Toast.makeText(context, "Настройки сохранены", Toast.LENGTH_SHORT).show()
                             onBack()
@@ -280,6 +282,120 @@ fun SettingsScreen(
                 }
             }
 
+            // Proxy / Base URL Configuration Card (Bypass regional blocking without VPN)
+            Card(
+                colors = CardDefaults.cardColors(
+                    containerColor = if (proxyUrlText.isNotBlank()) Color(0xFF132A4A) else Color(0xFF1E293B)
+                ),
+                shape = RoundedCornerShape(12.dp),
+                border = if (proxyUrlText.isNotBlank()) androidx.compose.foundation.BorderStroke(1.5.dp, NovaPrimary) else null,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Surface(
+                            shape = androidx.compose.foundation.shape.CircleShape,
+                            color = if (proxyUrlText.isNotBlank()) NovaPrimary.copy(alpha = 0.2f) else DarkSurfaceVariant,
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Default.Public,
+                                    contentDescription = "Прокси / Base URL",
+                                    tint = if (proxyUrlText.isNotBlank()) NovaPrimary else TextSecondary,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(
+                                text = "Прокси / Base URL (работа без VPN)",
+                                color = TextPrimary,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                text = "Обход региональных ограничений Gemini API",
+                                color = TextSecondary,
+                                fontSize = 12.sp
+                            )
+                        }
+                    }
+
+                    Text(
+                        text = "Укажите адрес обратного прокси или шлюза (Cloudflare Worker, VPS, Nginx и др.). Если поле пустое — запросы отправляются напрямую на серверы Google.",
+                        color = TextSecondary,
+                        fontSize = 12.sp,
+                        lineHeight = 16.sp
+                    )
+
+                    OutlinedTextField(
+                        value = proxyUrlText,
+                        onValueChange = { proxyUrlText = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = {
+                            Text(
+                                "Например: https://proxy.example.com",
+                                color = TextMuted,
+                                fontSize = 13.sp
+                            )
+                        },
+                        trailingIcon = {
+                            if (proxyUrlText.isNotBlank()) {
+                                IconButton(onClick = { proxyUrlText = "" }) {
+                                    Icon(
+                                        imageVector = Icons.Default.Clear,
+                                        contentDescription = "Очистить прокси",
+                                        tint = TextMuted
+                                    )
+                                }
+                            }
+                        },
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = TextPrimary,
+                            unfocusedTextColor = TextPrimary,
+                            focusedBorderColor = NovaPrimary,
+                            unfocusedBorderColor = DarkBorder,
+                            focusedContainerColor = DarkSurface,
+                            unfocusedContainerColor = DarkSurface
+                        ),
+                        shape = RoundedCornerShape(10.dp),
+                        singleLine = true
+                    )
+
+                    // Active connection indicator
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.padding(top = 2.dp)
+                    ) {
+                        val isProxyActive = proxyUrlText.isNotBlank()
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .clip(androidx.compose.foundation.shape.CircleShape)
+                                .background(if (isProxyActive) NovaPrimary else Color(0xFF10B981))
+                        )
+                        Text(
+                            text = if (isProxyActive) {
+                                "Маршрут: ${com.nova.ai.data.api.GeminiApiService.normalizeBaseUrl(proxyUrlText)}"
+                            } else {
+                                "Прямое соединение: generativelanguage.googleapis.com (по умолчанию)"
+                            },
+                            color = if (isProxyActive) NovaPrimary else TextMuted,
+                            fontSize = 11.sp,
+                            fontFamily = if (isProxyActive) androidx.compose.ui.text.font.FontFamily.Monospace else null
+                        )
+                    }
+                }
+            }
+
             // Security Warning Card
             Card(
                 colors = CardDefaults.cardColors(containerColor = Color(0xFF1E293B)),
@@ -297,7 +413,11 @@ fun SettingsScreen(
                         modifier = Modifier.size(24.dp)
                     )
                     Text(
-                        text = "Ваш API-ключ хранится строго локально на вашем смартфоне и отправляется исключительно напрямую на HTTPS REST сервер Google (generativelanguage.googleapis.com). Никаких сторонних прокси или серверов.",
+                        text = if (proxyUrlText.isNotBlank()) {
+                            "Ваш API-ключ хранится строго локально на устройстве и передаётся через указанный вами Base URL (${com.nova.ai.data.api.GeminiApiService.normalizeBaseUrl(proxyUrlText)})."
+                        } else {
+                            "Ваш API-ключ хранится строго локально на вашем смартфоне и отправляется исключительно напрямую на HTTPS REST сервер Google (generativelanguage.googleapis.com). Никаких сторонних серверов."
+                        },
                         color = TextSecondary,
                         fontSize = 13.sp,
                         lineHeight = 18.sp
@@ -621,7 +741,8 @@ fun SettingsScreen(
                         temperature = temperatureValue,
                         isWatchMode = isWatchMode,
                         isStreamingEnabled = isStreamingEnabled,
-                        isDynamicModelsEnabled = isDynamicModelsEnabled
+                        isDynamicModelsEnabled = isDynamicModelsEnabled,
+                        proxyUrl = proxyUrlText.trim()
                     )
                     Toast.makeText(context, "Настройки успешно сохранены!", Toast.LENGTH_SHORT).show()
                     onBack()

@@ -18,6 +18,35 @@ import java.util.concurrent.TimeUnit
 
 class GeminiApiService {
 
+    companion object {
+        const val DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com"
+
+        /**
+         * Normalizes user-specified Base URL / Proxy:
+         * - If blank or null, returns the default Gemini API base URL.
+         * - Guarantees scheme (https:// if not specified).
+         * - Strips trailing slashes and accidental /v1beta suffixes.
+         */
+        fun normalizeBaseUrl(url: String?): String {
+            if (url.isNullOrBlank()) return DEFAULT_BASE_URL
+            var clean = url.trim()
+            if (!clean.startsWith("http://") && !clean.startsWith("https://")) {
+                clean = "https://$clean"
+            }
+            clean = clean.trimEnd('/')
+            if (clean.endsWith("/v1beta")) {
+                clean = clean.substringBeforeLast("/v1beta").trimEnd('/')
+            }
+            return clean.ifBlank { DEFAULT_BASE_URL }
+        }
+    }
+
+    var defaultBaseUrl: String = DEFAULT_BASE_URL
+
+    fun getEffectiveBaseUrl(customBaseUrl: String? = null): String {
+        return normalizeBaseUrl(if (!customBaseUrl.isNullOrBlank()) customBaseUrl else defaultBaseUrl)
+    }
+
     private val gson = Gson()
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
 
@@ -32,12 +61,13 @@ class GeminiApiService {
 
     /**
      * Executes HTTP requests with automatic retry and exponential backoff
-     * for HTTP 503 (Model Overloaded / Service Unavailable) and 429 (Resource Exhausted).
-     * Delays: 1.5s -> 3.0s (up to 3 attempts total).
+     * for HTTP 503 (Model Overloaded / Service Unavailable), 429 (Resource Exhausted),
+     * and transient server/network errors. Total of 3 attempts.
      */
     private suspend fun executeWithRetry(
         requestBuilder: () -> Request
     ): Response {
+        val maxAttempts = 3
         val retryDelaysMs = listOf(1500L, 3000L)
         var attempt = 0
 
@@ -47,8 +77,10 @@ class GeminiApiService {
                 val request = requestBuilder()
                 val response = client.newCall(request).execute()
 
-                // Check for 503 or 429 retry condition
-                if ((response.code == 503 || response.code == 429) && attempt <= retryDelaysMs.size) {
+                // Check for 503, 429, 502, 504 retry condition
+                val code = response.code
+                val isRetryableCode = code == 503 || code == 429 || code == 502 || code == 504
+                if (isRetryableCode && attempt < maxAttempts) {
                     val delayMs = retryDelaysMs[attempt - 1]
                     response.close()
                     delay(delayMs)
@@ -57,8 +89,8 @@ class GeminiApiService {
 
                 return response
             } catch (e: IOException) {
-                // Retry transient network dropouts once
-                if (attempt <= retryDelaysMs.size) {
+                // Retry transient network dropouts up to maxAttempts
+                if (attempt < maxAttempts) {
                     val delayMs = retryDelaysMs[attempt - 1]
                     delay(delayMs)
                     continue
@@ -76,18 +108,20 @@ class GeminiApiService {
         apiKey: String,
         fileBytes: ByteArray,
         mimeType: String,
-        displayName: String
+        displayName: String,
+        customBaseUrl: String? = null
     ): Result<String> = withContext(Dispatchers.IO) {
         if (apiKey.isBlank()) {
             return@withContext Result.failure(IllegalArgumentException("Недействительный API-ключ. Проверьте правильность ключа в настройках."))
         }
 
         try {
+            val baseUrl = getEffectiveBaseUrl(customBaseUrl)
             // Step 1: Initiate resumable upload with retry
             val metadataJson = "{\"file\": {\"displayName\": \"${displayName.replace("\"", "\\\"")}\"}}"
             val initResponse = executeWithRetry {
                 Request.Builder()
-                    .url("https://generativelanguage.googleapis.com/upload/v1beta/files?key=$apiKey")
+                    .url("$baseUrl/upload/v1beta/files?key=$apiKey")
                     .post(metadataJson.toRequestBody(jsonMediaType))
                     .header("X-Goog-Upload-Protocol", "resumable")
                     .header("X-Goog-Upload-Command", "start")
@@ -146,20 +180,24 @@ class GeminiApiService {
      * removes "models/" prefix, and categorizes into Flash, Pro, and Other families.
      * Retries automatically on 503 and 429.
      */
-    suspend fun fetchAvailableModels(apiKey: String): Result<List<UiGeminiModel>> = withContext(Dispatchers.IO) {
+    suspend fun fetchAvailableModels(
+        apiKey: String,
+        customBaseUrl: String? = null
+    ): Result<List<UiGeminiModel>> = withContext(Dispatchers.IO) {
         if (apiKey.isBlank()) {
             return@withContext Result.failure(
                 IllegalArgumentException("Недействительный API-ключ. Проверьте правильность ключа в настройках.")
             )
         }
 
+        val baseUrl = getEffectiveBaseUrl(customBaseUrl)
         val allCollectedRemoteModels = mutableListOf<GeminiRemoteModelItem>()
         var pageToken: String? = null
         var pageCount = 0
 
         try {
             do {
-                val urlBuilder = StringBuilder("https://generativelanguage.googleapis.com/v1beta/models?key=$apiKey")
+                val urlBuilder = StringBuilder("$baseUrl/v1beta/models?key=$apiKey")
                 if (!pageToken.isNullOrBlank()) {
                     urlBuilder.append("&pageToken=$pageToken")
                 }
@@ -227,7 +265,8 @@ class GeminiApiService {
         model: String,
         conversationHistory: List<ChatMessage>,
         systemInstruction: String? = null,
-        temperature: Float = 0.7f
+        temperature: Float = 0.7f,
+        customBaseUrl: String? = null
     ): Result<String> = withContext(Dispatchers.IO) {
         if (apiKey.isBlank()) {
             return@withContext Result.failure(
@@ -303,9 +342,10 @@ class GeminiApiService {
         val jsonBody = gson.toJson(requestPayload)
         val requestBody = jsonBody.toRequestBody(jsonMediaType)
 
+        val baseUrl = getEffectiveBaseUrl(customBaseUrl)
         // Ensure clean model ID without redundant models/ prefix
         val cleanModel = model.removePrefix("models/").trim().ifBlank { UiGeminiModel.DEFAULT_MODEL_ID }
-        val url = "https://generativelanguage.googleapis.com/v1beta/models/$cleanModel:generateContent?key=$apiKey"
+        val url = "$baseUrl/v1beta/models/$cleanModel:generateContent?key=$apiKey"
 
         try {
             val response = executeWithRetry {
@@ -319,8 +359,16 @@ class GeminiApiService {
             val responseBody = response.body?.string() ?: ""
 
             if (!response.isSuccessful) {
-                val errorMessage = parseApiError(response.code, responseBody)
-                return@withContext Result.failure(ApiException(response.code, errorMessage))
+                val errorDetails = parseApiErrorDetails(response.code, responseBody)
+                return@withContext Result.failure(
+                    ApiException(
+                        code = response.code,
+                        message = errorDetails.userFriendlyMessage,
+                        status = errorDetails.status,
+                        isOverloaded = errorDetails.isOverloaded,
+                        isResourceExhausted = errorDetails.isResourceExhausted
+                    )
+                )
             }
 
             val parsedResponse = gson.fromJson(responseBody, GeminiGenerateResponse::class.java)
@@ -346,15 +394,17 @@ class GeminiApiService {
     }
 
     /**
-     * Streaming generateContent with automatic retry on initial connection failure (503/429).
-     * Emits chunks of text in a Kotlin Flow.
+     * Streaming generateContent with automatic retry (up to 3 attempts total)
+     * on connection failure or stream errors caused by 503, UNAVAILABLE, overloaded, or resource exhausted.
+     * Emits chunks of text in real time via Kotlin Flow.
      */
     fun generateContentStream(
         apiKey: String,
         model: String,
         conversationHistory: List<ChatMessage>,
         systemInstruction: String? = null,
-        temperature: Float = 0.7f
+        temperature: Float = 0.7f,
+        customBaseUrl: String? = null
     ): Flow<String> = flow {
         if (apiKey.isBlank()) {
             throw IllegalArgumentException("Недействительный API-ключ. Проверьте правильность ключа в настройках.")
@@ -392,75 +442,249 @@ class GeminiApiService {
             )
         )
 
+        val baseUrl = getEffectiveBaseUrl(customBaseUrl)
         val cleanModel = model.removePrefix("models/").trim().ifBlank { UiGeminiModel.DEFAULT_MODEL_ID }
-        val url = "https://generativelanguage.googleapis.com/v1beta/models/$cleanModel:streamGenerateContent?alt=sse&key=$apiKey"
-        val requestBody = gson.toJson(requestPayload).toRequestBody(jsonMediaType)
+        val url = "$baseUrl/v1beta/models/$cleanModel:streamGenerateContent?alt=sse&key=$apiKey"
+        val jsonPayload = gson.toJson(requestPayload)
 
-        val response = executeWithRetry {
-            Request.Builder()
+        val maxAttempts = 3
+        val retryDelaysMs = listOf(1500L, 3000L)
+        var attempt = 0
+        var hasEmittedAnyText = false
+
+        while (attempt < maxAttempts) {
+            attempt++
+            val requestBody = jsonPayload.toRequestBody(jsonMediaType)
+            val request = Request.Builder()
                 .url(url)
                 .post(requestBody)
                 .header("Content-Type", "application/json")
+                .header("Accept", "text/event-stream")
+                .header("Cache-Control", "no-cache")
                 .build()
-        }
 
-        if (!response.isSuccessful) {
-            val errBody = response.body?.string() ?: ""
-            throw ApiException(response.code, parseApiError(response.code, errBody))
-        }
+            var response: Response? = null
+            var streamError: Throwable? = null
 
-        val body = response.body ?: throw IOException("Нет подключения к интернету или превышено время ожидания.")
-        val reader = BufferedReader(InputStreamReader(body.byteStream()))
-        try {
-            var line: String?
-            while (reader.readLine().also { line = it } != null) {
-                val currentLine = line ?: continue
-                if (currentLine.startsWith("data: ")) {
-                    val dataJson = currentLine.removePrefix("data: ").trim()
-                    if (dataJson.isNotEmpty() && dataJson != "[DONE]") {
-                        try {
-                            val chunk = gson.fromJson(dataJson, GeminiGenerateResponse::class.java)
-                            val text = chunk.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text
-                            if (!text.isNullOrEmpty()) {
-                                emit(text)
-                            }
-                        } catch (_: Exception) {
-                            // Skip parse errors on intermediate SSE events
-                        }
+            try {
+                response = client.newCall(request).execute()
+
+                if (!response.isSuccessful) {
+                    val errBody = response.body?.string() ?: ""
+                    val errorDetails = parseApiErrorDetails(response.code, errBody)
+                    val apiException = ApiException(
+                        code = response.code,
+                        message = errorDetails.userFriendlyMessage,
+                        status = errorDetails.status,
+                        isOverloaded = errorDetails.isOverloaded,
+                        isResourceExhausted = errorDetails.isResourceExhausted
+                    )
+
+                    // Retry up to 3 attempts on retryable errors
+                    if (errorDetails.isRetryable && attempt < maxAttempts) {
+                        response.close()
+                        delay(retryDelaysMs[attempt - 1])
+                        continue
+                    } else {
+                        throw apiException
                     }
                 }
+
+                val body = response.body ?: throw IOException("Пустой ответ от сервера")
+                val reader = BufferedReader(InputStreamReader(body.byteStream(), Charsets.UTF_8), 1024)
+
+                try {
+                    var line: String?
+                    while (reader.readLine().also { line = it } != null) {
+                        val currentLine = line?.trim() ?: continue
+                        if (currentLine.startsWith("data:")) {
+                            val dataJson = currentLine.substringAfter("data:").trim()
+                            if (dataJson.isNotEmpty() && dataJson != "[DONE]") {
+                                if (dataJson.startsWith("{\"error\":")) {
+                                    val errDetails = parseApiErrorDetails(response.code, dataJson)
+                                    throw ApiException(
+                                        code = errDetails.code,
+                                        message = errDetails.userFriendlyMessage,
+                                        status = errDetails.status,
+                                        isOverloaded = errDetails.isOverloaded,
+                                        isResourceExhausted = errDetails.isResourceExhausted
+                                    )
+                                }
+
+                                val chunk = gson.fromJson(dataJson, GeminiGenerateResponse::class.java)
+                                val blockReason = chunk.promptFeedback?.blockReason
+                                val candidate = chunk.candidates?.firstOrNull()
+                                val finishReason = candidate?.finishReason
+
+                                if (blockReason != null || finishReason == "SAFETY") {
+                                    throw Exception("Ответ или прикреплённое фото заблокированы фильтрами безопасности Google.")
+                                }
+
+                                val parts = candidate?.content?.parts
+                                if (!parts.isNullOrEmpty()) {
+                                    for (part in parts) {
+                                        val partText = part.text
+                                        if (!partText.isNullOrEmpty()) {
+                                            hasEmittedAnyText = true
+                                            emit(partText)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } finally {
+                    try { reader.close() } catch (_: Exception) {}
+                }
+            } catch (e: Exception) {
+                streamError = e
+            } finally {
+                try { response?.close() } catch (_: Exception) {}
             }
-        } finally {
-            reader.close()
-            response.close()
+
+            if (streamError != null) {
+                val isRetryable = when (streamError) {
+                    is ApiException -> streamError.isRetryable
+                    is IOException -> true
+                    else -> false
+                }
+
+                // Retry if no partial tokens were emitted to prevent duplicated messages
+                if (!hasEmittedAnyText && isRetryable && attempt < maxAttempts) {
+                    delay(retryDelaysMs[attempt - 1])
+                    continue
+                }
+                throw streamError
+            }
+
+            if (!hasEmittedAnyText) {
+                throw Exception("Получен пустой ответ от модели Gemini.")
+            }
+            return@flow
         }
     }.flowOn(Dispatchers.IO)
+
+    /**
+     * Parses error response from Gemini API into structured details,
+     * identifying genuine overload, quota exhaustion, or distinct client/server errors
+     * instead of masking non-overload errors.
+     */
+    fun parseApiErrorDetails(statusCode: Int, responseBody: String): ApiErrorDetails {
+        var parsedCode = statusCode
+        var serverMessage: String? = null
+        var errorStatus: String? = null
+
+        if (responseBody.isNotBlank()) {
+            try {
+                val errorWrapper = gson.fromJson(responseBody, GeminiApiErrorWrapper::class.java)
+                errorWrapper?.error?.let { err ->
+                    if (err.code != null && err.code != 0) parsedCode = err.code
+                    serverMessage = err.message
+                    errorStatus = err.status
+                }
+            } catch (_: Exception) {
+                if (responseBody.length < 200 && !responseBody.contains("<html", ignoreCase = true)) {
+                    serverMessage = responseBody.trim()
+                }
+            }
+        }
+
+        val msgLower = (serverMessage ?: "").lowercase()
+        val statusUpper = (errorStatus ?: "").uppercase()
+
+        // 1. Check for genuine model overload
+        val isOverloaded = parsedCode == 503 ||
+                statusUpper == "UNAVAILABLE" ||
+                msgLower.contains("overload") ||
+                msgLower.contains("unavailable") ||
+                msgLower.contains("перегруж")
+
+        // 2. Check for resource / quota exhaustion
+        val isResourceExhausted = parsedCode == 429 ||
+                statusUpper == "RESOURCE_EXHAUSTED" ||
+                msgLower.contains("resource exhausted") ||
+                msgLower.contains("resource_exhausted") ||
+                msgLower.contains("quota") ||
+                msgLower.contains("rate limit")
+
+        val userFriendlyMessage = when {
+            isOverloaded -> {
+                val detail = if (!serverMessage.isNullOrBlank()) " ($serverMessage)" else ""
+                "Серверы модели временно перегружены запросами (HTTP 503 UNAVAILABLE)$detail. Подождите несколько секунд и попробуйте снова или временно выберите другую модель."
+            }
+            isResourceExhausted -> {
+                val detail = if (!serverMessage.isNullOrBlank()) " ($serverMessage)" else ""
+                "Превышен лимит запросов к Gemini API (HTTP 429 Resource Exhausted)$detail. Подождите 1–2 минуты или используйте другой API-ключ."
+            }
+            parsedCode == 401 || parsedCode == 403 || statusUpper == "PERMISSION_DENIED" || statusUpper == "UNAUTHENTICATED" -> {
+                val detail = if (!serverMessage.isNullOrBlank()) " Детали: $serverMessage." else ""
+                "Ошибка авторизации (HTTP $parsedCode): Недействительный API-ключ или нет доступа.$detail Проверьте правильность ключа в настройках."
+            }
+            parsedCode == 404 || statusUpper == "NOT_FOUND" -> {
+                val detail = if (!serverMessage.isNullOrBlank()) ": $serverMessage" else ""
+                "Выбранная модель не найдена в Gemini API (HTTP 404)$detail. Попробуйте выбрать другую модель в заголовке чата."
+            }
+            parsedCode == 400 || statusUpper == "INVALID_ARGUMENT" || statusUpper == "FAILED_PRECONDITION" -> {
+                if (msgLower.contains("location")) {
+                    "Доступ к Gemini API ограничен в вашем регионе (HTTP 400): ${serverMessage ?: "User location is not supported"}."
+                } else {
+                    val detail = if (!serverMessage.isNullOrBlank()) ": $serverMessage" else ""
+                    "Некорректный запрос к Gemini API (HTTP 400$statusUpper)$detail."
+                }
+            }
+            parsedCode == 500 || statusUpper == "INTERNAL" -> {
+                val detail = if (!serverMessage.isNullOrBlank()) ": $serverMessage" else ""
+                "Внутренняя ошибка сервиса Google Gemini (HTTP 500 INTERNAL)$detail. Попробуйте повторить запрос позже."
+            }
+            parsedCode == 502 || parsedCode == 504 -> {
+                "Сетевой шлюз Google временно недоступен (HTTP $parsedCode). Повторите попытку через несколько секунд."
+            }
+            else -> {
+                if (!serverMessage.isNullOrBlank()) {
+                    "Ошибка Gemini API (HTTP $parsedCode${if (errorStatus != null) " $errorStatus" else ""}): $serverMessage"
+                } else {
+                    "Ошибка связи с Gemini API (HTTP $parsedCode)."
+                }
+            }
+        }
+
+        return ApiErrorDetails(
+            code = parsedCode,
+            serverMessage = serverMessage,
+            status = errorStatus,
+            isOverloaded = isOverloaded,
+            isResourceExhausted = isResourceExhausted,
+            userFriendlyMessage = userFriendlyMessage
+        )
+    }
 
     /**
      * Formats error codes according to user specifications.
      */
     fun parseApiError(statusCode: Int, responseBody: String): String {
-        return when (statusCode) {
-            503 -> "Серверы Google сейчас перегружены. Подождите несколько секунд и попробуйте снова или временно выберите другую модель."
-            429 -> "Превышен лимит бесплатных запросов. Подождите 1–2 минуты."
-            401, 403 -> "Недействительный API-ключ. Проверьте правильность ключа в настройках."
-            400, 404 -> "Выбранная модель недоступна или запрос составлен некорректно."
-            500, 502, 504 -> "Серверы Google сейчас перегружены. Подождите несколько секунд и попробуйте снова или временно выберите другую модель."
-            else -> {
-                try {
-                    val errorResponse = gson.fromJson(responseBody, GeminiApiErrorWrapper::class.java)
-                    val serverMessage = errorResponse?.error?.message
-                    if (!serverMessage.isNullOrBlank()) {
-                        "Ошибка Gemini API (HTTP $statusCode): $serverMessage"
-                    } else {
-                        "Ошибка Gemini API (HTTP $statusCode)."
-                    }
-                } catch (_: Exception) {
-                    "Ошибка Gemini API (HTTP $statusCode)."
-                }
-            }
-        }
+        return parseApiErrorDetails(statusCode, responseBody).userFriendlyMessage
     }
 }
 
-class ApiException(val code: Int, message: String) : Exception(message)
+data class ApiErrorDetails(
+    val code: Int,
+    val serverMessage: String?,
+    val status: String?,
+    val isOverloaded: Boolean,
+    val isResourceExhausted: Boolean,
+    val userFriendlyMessage: String
+) {
+    val isRetryable: Boolean
+        get() = isOverloaded || isResourceExhausted || code in listOf(429, 502, 503, 504)
+}
+
+class ApiException(
+    val code: Int,
+    message: String,
+    val status: String? = null,
+    val isOverloaded: Boolean = false,
+    val isResourceExhausted: Boolean = false
+) : Exception(message) {
+    val isRetryable: Boolean
+        get() = isOverloaded || isResourceExhausted || code in listOf(429, 502, 503, 504)
+}

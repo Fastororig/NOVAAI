@@ -53,7 +53,7 @@ fun ChatScreen(
     val listState = rememberLazyListState()
 
     val currentConversation = viewModel.currentConversation
-    val messages = currentConversation?.messages ?: emptyList()
+    val messages = viewModel.currentMessages
     val isLoading = viewModel.isLoading
     val currentModel = viewModel.selectedModel
     val isKeyConfigured = viewModel.apiKey.isNotBlank()
@@ -71,10 +71,11 @@ fun ChatScreen(
         }
     }
 
-    // Auto-scroll to bottom when new messages arrive
-    LaunchedEffect(messages.size, isLoading) {
+    // Auto-scroll to bottom when new messages arrive or when new tokens stream in
+    val lastMessageTextLength = messages.lastOrNull()?.text?.length ?: 0
+    LaunchedEffect(messages.size, lastMessageTextLength) {
         if (messages.isNotEmpty()) {
-            listState.animateScrollToItem(messages.size - 1)
+            listState.scrollToItem(messages.size - 1)
         }
     }
 
@@ -344,7 +345,8 @@ fun ChatScreen(
                         )
                     }
 
-                    if (isLoading) {
+                    val hasPendingMessage = messages.any { it.isPending }
+                    if (isLoading && !hasPendingMessage) {
                         item {
                             Row(
                                 modifier = Modifier
@@ -353,21 +355,6 @@ fun ChatScreen(
                                 horizontalArrangement = Arrangement.Start,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Surface(
-                                    shape = CircleShape,
-                                    color = DarkSurfaceVariant,
-                                    modifier = Modifier.size(if (isWatchMode) 22.dp else 28.dp)
-                                ) {
-                                    Box(contentAlignment = Alignment.Center) {
-                                        Icon(
-                                            imageVector = Icons.Default.AutoAwesome,
-                                            contentDescription = null,
-                                            tint = NovaPrimary,
-                                            modifier = Modifier.size(if (isWatchMode) 12.dp else 16.dp)
-                                        )
-                                    }
-                                }
-                                Spacer(modifier = Modifier.width(6.dp))
                                 CircularProgressIndicator(
                                     modifier = Modifier.size(if (isWatchMode) 14.dp else 18.dp),
                                     color = NovaPrimary,
@@ -375,7 +362,7 @@ fun ChatScreen(
                                 )
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text(
-                                    text = "Nova думает...",
+                                    text = "Подготовка...",
                                     color = TextSecondary,
                                     fontSize = if (isWatchMode) 11.sp else 13.sp
                                 )
@@ -798,12 +785,39 @@ private fun MessageBubble(
                                 Text("Повторить", fontSize = 11.sp, color = Color.White)
                             }
                         } else {
-                            MarkdownViewer(text = message.text)
+                            if (message.text.isBlank() && message.isPending) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    modifier = Modifier.padding(vertical = if (isWatchMode) 2.dp else 4.dp)
+                                ) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(if (isWatchMode) 12.dp else 14.dp),
+                                        color = NovaPrimary,
+                                        strokeWidth = 2.dp
+                                    )
+                                    Text(
+                                        text = "Печатает...",
+                                        color = TextSecondary,
+                                        fontSize = if (isWatchMode) 11.sp else 13.sp
+                                    )
+                                }
+                            } else {
+                                MarkdownViewer(text = message.text)
+                                if (message.isPending) {
+                                    Box(
+                                        modifier = Modifier
+                                            .padding(top = 2.dp)
+                                            .size(width = 4.dp, height = if (isWatchMode) 12.dp else 14.dp)
+                                            .background(NovaPrimary, RoundedCornerShape(1.dp))
+                                    )
+                                }
+                            }
                         }
                     }
                 }
 
-                if (!isUser && !isError) {
+                if (!isUser && !isError && !message.isPending) {
                     Row(
                         modifier = Modifier
                             .padding(top = 2.dp, start = 2.dp),

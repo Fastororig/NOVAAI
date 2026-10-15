@@ -38,6 +38,10 @@ class PreferencesManager(context: Context) {
         get() = delegate.isDynamicModelsEnabled
         set(value) { delegate.isDynamicModelsEnabled = value }
 
+    var proxyUrl: String
+        get() = delegate.proxyUrl
+        set(value) { delegate.proxyUrl = value }
+
     fun clearCachedModels() = delegate.clearCachedModels()
     fun clearAll() = delegate.clearAll()
 }

@@ -66,6 +66,14 @@ class ApiKeyPreferences(context: Context) {
         get() = prefs.getBoolean(KEY_DYNAMIC_MODELS_ENABLED, true)
         set(value) = prefs.edit().putBoolean(KEY_DYNAMIC_MODELS_ENABLED, value).apply()
 
+    /**
+     * Proxy / Base URL for accessing Google Gemini API without VPN in restricted regions.
+     * When blank, requests go directly to generativelanguage.googleapis.com.
+     */
+    var proxyUrl: String
+        get() = prefs.getString(KEY_PROXY_URL, "") ?: ""
+        set(value) = prefs.edit().putString(KEY_PROXY_URL, value.trim()).apply()
+
     var modelsCacheTimestamp: Long
         get() = prefs.getLong(KEY_MODELS_CACHE_TIME, 0L)
         private set(value) = prefs.edit().putLong(KEY_MODELS_CACHE_TIME, value).apply()
@@ -107,6 +115,7 @@ class ApiKeyPreferences(context: Context) {
         private const val KEY_WATCH_MODE = "smartwatch_mode_enabled"
         private const val KEY_STREAMING_ENABLED = "gemini_streaming_enabled"
         private const val KEY_DYNAMIC_MODELS_ENABLED = "gemini_dynamic_models_enabled"
+        private const val KEY_PROXY_URL = "gemini_proxy_url"
         private const val KEY_MODELS_CACHE_JSON = "models_cache_json"
         private const val KEY_MODELS_CACHE_TIME = "models_cache_time"
     }

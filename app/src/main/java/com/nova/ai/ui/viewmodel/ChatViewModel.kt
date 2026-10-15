@@ -11,6 +11,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.nova.ai.data.api.ApiException
 import com.nova.ai.data.api.GeminiApiService
 import com.nova.ai.data.model.*
 import com.nova.ai.data.storage.ApiKeyPreferences
@@ -36,6 +37,16 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     var temperature by mutableStateOf(preferences.temperature)
         private set
+
+    var proxyUrl by mutableStateOf(preferences.proxyUrl)
+        private set
+
+    fun updateProxyUrl(url: String) {
+        val trimmed = url.trim()
+        proxyUrl = trimmed
+        preferences.proxyUrl = trimmed
+        apiService.defaultBaseUrl = trimmed
+    }
 
     // Smartwatch Mode (M99 1:1) state & public controls
     private val _isWatchMode = mutableStateOf(preferences.isWatchMode)
@@ -95,6 +106,22 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     var currentConversationId by mutableStateOf("")
         private set
 
+    // Observable snapshot list of messages for the active conversation,
+    // ensuring instantaneous token-by-token UI recomposition during streaming.
+    val currentMessages = mutableStateListOf<ChatMessage>()
+
+    fun syncCurrentMessages() {
+        currentMessages.clear()
+        currentConversation?.messages?.let { currentMessages.addAll(it) }
+    }
+
+    fun commitCurrentMessages() {
+        currentConversation?.let { conv ->
+            conv.messages.clear()
+            conv.messages.addAll(currentMessages)
+        }
+    }
+
     var isLoading by mutableStateOf(false)
         private set
 
@@ -118,6 +145,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         get() = conversations.find { it.id == currentConversationId } ?: conversations.firstOrNull()
 
     init {
+        apiService.defaultBaseUrl = preferences.proxyUrl
         loadData()
         loadInitialModels()
     }
@@ -130,8 +158,11 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             if (conversations.isNotEmpty()) {
                 currentConversationId = conversations.first().id
             } else {
-                createNewConversation()
+                val newConv = Conversation(title = "Диалог 1")
+                conversations.add(newConv)
+                currentConversationId = newConv.id
             }
+            syncCurrentMessages()
         }
     }
 
@@ -172,7 +203,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         modelsErrorMessage = null
 
         viewModelScope.launch {
-            val result = apiService.fetchAvailableModels(apiKey)
+            val result = apiService.fetchAvailableModels(apiKey, customBaseUrl = proxyUrl)
             isLoadingModels = false
 
             result.onSuccess { remoteModels ->
@@ -347,12 +378,14 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     fun selectConversation(id: String) {
         currentConversationId = id
+        syncCurrentMessages()
     }
 
     fun createNewConversation() {
         val newConv = Conversation(title = "Диалог ${conversations.size + 1}")
         conversations.add(0, newConv)
         currentConversationId = newConv.id
+        syncCurrentMessages()
         saveConversations()
     }
 
@@ -364,6 +397,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 if (currentConversationId == id) {
                     currentConversationId = conversations.first().id
                 }
+                syncCurrentMessages()
                 saveConversations()
             }
         }
@@ -377,13 +411,16 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         temperature: Float,
         isWatchMode: Boolean = this.isWatchMode,
         isStreamingEnabled: Boolean = this.isStreamingEnabled,
-        isDynamicModelsEnabled: Boolean = this.isDynamicModelsEnabled
+        isDynamicModelsEnabled: Boolean = this.isDynamicModelsEnabled,
+        proxyUrl: String = this.proxyUrl
     ) {
         val keyChanged = this.apiKey != apiKey
+        val proxyChanged = this.proxyUrl != proxyUrl.trim()
         this.apiKey = apiKey
         this.selectedModel = model
         this.systemInstruction = systemInstruction
         this.temperature = temperature
+        this.proxyUrl = proxyUrl.trim()
         setWatchMode(isWatchMode)
         setStreamingEnabled(isStreamingEnabled)
         setDynamicModelsEnabled(isDynamicModelsEnabled)
@@ -392,8 +429,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         preferences.selectedModel = model
         preferences.systemInstruction = systemInstruction
         preferences.temperature = temperature
+        preferences.proxyUrl = proxyUrl.trim()
+        apiService.defaultBaseUrl = proxyUrl.trim()
 
-        if (keyChanged && apiKey.isNotBlank() && this.isDynamicModelsEnabled) {
+        if ((keyChanged || proxyChanged) && apiKey.isNotBlank() && this.isDynamicModelsEnabled) {
             refreshModels()
         }
     }
@@ -414,9 +453,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             text = textTrimmed,
             attachments = attachmentsToSend
         )
-        conv.messages.add(userMessage)
+        currentMessages.add(userMessage)
+        commitCurrentMessages()
 
-        if (conv.messages.size == 1 || conv.title.startsWith("Диалог")) {
+        if (currentMessages.size == 1 || conv.title.startsWith("Диалог")) {
             val titleCandidate = textTrimmed.ifBlank { attachmentsToSend.firstOrNull()?.name ?: "Файл" }
             conv.title = titleCandidate.take(28) + if (titleCandidate.length > 28) "..." else ""
         }
@@ -424,12 +464,13 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         saveConversations()
 
         if (apiKey.isBlank()) {
-            conv.messages.add(
+            currentMessages.add(
                 ChatMessage(
                     role = MessageRole.ERROR,
                     text = "API-ключ не настроен. Нажмите на иконку настроек вверху и введите ваш ключ Google Gemini."
                 )
             )
+            commitCurrentMessages()
             saveConversations()
             return
         }
@@ -441,7 +482,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             val finalAttachments = mutableListOf<AttachmentInfo>()
             for (att in attachmentsToSend) {
                 if (att.base64Data.isNullOrBlank() && att.remoteFileUri.isNullOrBlank() && !att.uriString.isNullOrBlank()) {
-                    // Upload via Files API
                     try {
                         val uri = Uri.parse(att.uriString)
                         val bytes = getApplication<Application>().contentResolver.openInputStream(uri)?.use { it.readBytes() }
@@ -450,7 +490,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                                 apiKey = apiKey,
                                 fileBytes = bytes,
                                 mimeType = att.mimeType,
-                                displayName = att.name
+                                displayName = att.name,
+                                customBaseUrl = proxyUrl
                             )
                             if (uploadResult.isSuccess) {
                                 finalAttachments.add(att.copy(remoteFileUri = uploadResult.getOrNull()))
@@ -469,67 +510,129 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             }
 
             // Update user message with uploaded URIs if changed
-            val msgIndex = conv.messages.indexOfFirst { it.id == userMessage.id }
-            if (msgIndex != -1) {
-                conv.messages[msgIndex] = userMessage.copy(attachments = finalAttachments)
+            val userMsgIndex = currentMessages.indexOfFirst { it.id == userMessage.id }
+            if (userMsgIndex != -1) {
+                currentMessages[userMsgIndex] = userMessage.copy(attachments = finalAttachments)
+                commitCurrentMessages()
             }
 
-            var result = apiService.generateContent(
-                apiKey = apiKey,
-                model = selectedModel,
-                conversationHistory = conv.messages,
-                systemInstruction = systemInstruction.ifBlank { null },
-                temperature = temperature
+            // Immediately create the assistant placeholder message so UI displays it with zero lag
+            val assistantMessage = ChatMessage(
+                role = MessageRole.MODEL,
+                text = "",
+                modelUsed = selectedModel,
+                isPending = true
             )
+            currentMessages.add(assistantMessage)
+            commitCurrentMessages()
 
-            // If model returned an error (e.g. 404/400 model unavailable) and is not already the default model,
-            // automatically switch to the default stable model (gemini-2.5-flash) and retry
-            if (result.isFailure && selectedModel != UiGeminiModel.DEFAULT_MODEL_ID) {
-                val ex = result.exceptionOrNull()
-                val isModelError = (ex is com.nova.ai.data.api.ApiException && (ex.code == 404 || ex.code == 400)) ||
-                        ex?.message?.contains("недоступна", ignoreCase = true) == true
-                if (isModelError) {
+            var activeModel = selectedModel
+            val accumulatedText = StringBuilder()
+            var streamSuccess = false
+
+            try {
+                val history = currentMessages.filter { it.id != assistantMessage.id }
+                apiService.generateContentStream(
+                    apiKey = apiKey,
+                    model = activeModel,
+                    conversationHistory = history,
+                    systemInstruction = systemInstruction.ifBlank { null },
+                    temperature = temperature,
+                    customBaseUrl = proxyUrl
+                ).collect { chunk ->
+                    accumulatedText.append(chunk)
+                    val idx = currentMessages.indexOfFirst { it.id == assistantMessage.id }
+                    if (idx != -1) {
+                        currentMessages[idx] = assistantMessage.copy(
+                            text = accumulatedText.toString(),
+                            modelUsed = activeModel,
+                            isPending = true
+                        )
+                    }
+                }
+                streamSuccess = true
+            } catch (e: Exception) {
+                val isModelNotFoundError = (e is ApiException && e.code == 404) ||
+                        e.message?.contains("не найдена", ignoreCase = true) == true
+
+                // If selected model is completely missing/not found (404) and no text has been received, fallback to default model
+                if (isModelNotFoundError && activeModel != UiGeminiModel.DEFAULT_MODEL_ID && accumulatedText.isEmpty()) {
+                    activeModel = UiGeminiModel.DEFAULT_MODEL_ID
                     selectedModel = UiGeminiModel.DEFAULT_MODEL_ID
                     preferences.selectedModel = UiGeminiModel.DEFAULT_MODEL_ID
-                    result = apiService.generateContent(
-                        apiKey = apiKey,
-                        model = selectedModel,
-                        conversationHistory = conv.messages,
-                        systemInstruction = systemInstruction.ifBlank { null },
-                        temperature = temperature
+
+                    try {
+                        val history = currentMessages.filter { it.id != assistantMessage.id }
+                        apiService.generateContentStream(
+                            apiKey = apiKey,
+                            model = activeModel,
+                            conversationHistory = history,
+                            systemInstruction = systemInstruction.ifBlank { null },
+                            temperature = temperature,
+                            customBaseUrl = proxyUrl
+                        ).collect { chunk ->
+                            accumulatedText.append(chunk)
+                            val idx = currentMessages.indexOfFirst { it.id == assistantMessage.id }
+                            if (idx != -1) {
+                                currentMessages[idx] = assistantMessage.copy(
+                                    text = accumulatedText.toString(),
+                                    modelUsed = activeModel,
+                                    isPending = true
+                                )
+                            }
+                        }
+                        streamSuccess = true
+                    } catch (retryError: Exception) {
+                        handleStreamError(assistantMessage.id, retryError, accumulatedText)
+                    }
+                } else {
+                    handleStreamError(assistantMessage.id, e, accumulatedText)
+                }
+            }
+
+            if (streamSuccess) {
+                val idx = currentMessages.indexOfFirst { it.id == assistantMessage.id }
+                if (idx != -1) {
+                    currentMessages[idx] = assistantMessage.copy(
+                        text = accumulatedText.toString(),
+                        modelUsed = activeModel,
+                        isPending = false
                     )
                 }
             }
 
             isLoading = false
-
-            result.onSuccess { responseText ->
-                conv.messages.add(
-                    ChatMessage(
-                        role = MessageRole.MODEL,
-                        text = responseText,
-                        modelUsed = selectedModel
-                    )
-                )
-            }.onFailure { error ->
-                conv.messages.add(
-                    ChatMessage(
-                        role = MessageRole.ERROR,
-                        text = error.localizedMessage ?: "Неизвестная ошибка связи с Gemini API"
-                    )
-                )
-            }
-
+            commitCurrentMessages()
             saveConversations()
         }
     }
 
-    fun retryLastMessage() {
-        val conv = currentConversation ?: return
-        val lastUserMessage = conv.messages.lastOrNull { it.role == MessageRole.USER } ?: return
+    private fun handleStreamError(messageId: String, error: Throwable, partialText: StringBuilder) {
+        val idx = currentMessages.indexOfFirst { it.id == messageId }
+        if (idx != -1) {
+            val errorMessage = error.localizedMessage?.ifBlank { null }
+                ?: error.message?.ifBlank { null }
+                ?: "Неизвестная ошибка связи с Gemini API"
+            if (partialText.isEmpty()) {
+                currentMessages[idx] = ChatMessage(
+                    role = MessageRole.ERROR,
+                    text = errorMessage
+                )
+            } else {
+                currentMessages[idx] = currentMessages[idx].copy(
+                    isPending = false,
+                    text = partialText.toString() + "\n\n[Прервано: $errorMessage]"
+                )
+            }
+        }
+    }
 
-        if (conv.messages.lastOrNull()?.role == MessageRole.ERROR) {
-            conv.messages.removeAt(conv.messages.size - 1)
+    fun retryLastMessage() {
+        val lastUserMessage = currentMessages.lastOrNull { it.role == MessageRole.USER } ?: return
+
+        if (currentMessages.lastOrNull()?.role == MessageRole.ERROR) {
+            currentMessages.removeAt(currentMessages.size - 1)
+            commitCurrentMessages()
         }
 
         // Re-attach last attachments if any
