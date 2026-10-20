@@ -37,6 +37,55 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.nova.ai.ui.theme.*
 
+/**
+ * Sanitizes raw text containing LaTeX before Markdown parsing:
+ * 1. Replaces unsupported arrows (\longrightarrow -> \to, \uparrow -> ↑, etc.)
+ * 2. Normalizes line breaks around $$ blocks so closing $$ is always followed by \n\n,
+ *    preventing headers (####) and dividers (---) from sticking to the block.
+ */
+fun sanitizeLaTeX(rawText: String): String {
+    if (rawText.isBlank()) return ""
+
+    var s = rawText
+
+    // 1. Replace unsupported arrows with standard/compatible equivalents
+    s = s.replace(Regex("""\\longrightarrow\b"""), "\\to")
+    s = s.replace(Regex("""\\longleftarrow\b"""), "\\leftarrow")
+    s = s.replace(Regex("""\\longleftrightarrow\b"""), "\\leftrightarrow")
+    s = s.replace(Regex("""\\Longrightarrow\b"""), "\\implies")
+    s = s.replace(Regex("""\\Longleftarrow\b"""), "\\Leftarrow")
+    s = s.replace(Regex("""\\Longleftrightarrow\b"""), "\\iff")
+
+    s = s.replace(Regex("""\\uparrow\b"""), "↑")
+    s = s.replace(Regex("""\\downarrow\b"""), "↓")
+    s = s.replace(Regex("""\\updownarrow\b"""), "↕")
+    s = s.replace(Regex("""\\Uparrow\b"""), "⇑")
+    s = s.replace(Regex("""\\Downarrow\b"""), "⇓")
+    s = s.replace(Regex("""\\Updownarrow\b"""), "⇕")
+
+    // Normalize escaped bracket delimiters
+    s = s.replace("\\\\[", "$$").replace("\\\\]", "$$")
+    s = s.replace("\\[", "$$").replace("\\]", "$$")
+    s = s.replace("\\\\(", "$").replace("\\\\)", "$")
+    s = s.replace("\\(", "$").replace("\\)", "$")
+
+    // Normalize escaped LaTeX commands: \\frac -> \frac
+    s = s.replace(Regex("""\\\\([a-zA-Z]+)""")) { "\\" + it.groupValues[1] }
+
+    // 2. Normalize newlines around $$ blocks:
+    // Ensure after closing $$ there are strictly two newlines (\n\n) so following headers (####) and dividers (---) are not glued to the block
+    s = s.replace(Regex("""\$\$\s*([\s\S]*?)\s*\$\$""")) { matchResult ->
+        val innerFormula = matchResult.groupValues[1].trim()
+        "\n\n$$$innerFormula$$\n\n"
+    }
+
+    s = s.replace(Regex("""\n{3,}"""), "\n\n")
+
+    return s.trim()
+}
+
+fun preprocessRawMarkdown(raw: String): String = sanitizeLaTeX(raw)
+
 @Composable
 fun MarkdownViewer(
     text: String,
@@ -44,7 +93,8 @@ fun MarkdownViewer(
     isWatchMode: Boolean = false
 ) {
     val context = LocalContext.current
-    val blocks = parseMarkdownBlocks(text)
+    val preprocessed = sanitizeLaTeX(text)
+    val blocks = parseMarkdownBlocks(preprocessed)
 
     Column(
         modifier = modifier,
@@ -62,12 +112,16 @@ fun MarkdownViewer(
                     )
                 }
                 is MarkdownBlock.MathBlock -> {
-                    MathBlockCard(
+                    MathDisplayBlock(
                         formula = block.formula,
-                        isWatchMode = isWatchMode,
-                        onCopy = {
-                            copyToClipboard(context, "formula", block.formula, "Формула скопирована")
-                        }
+                        isWatchMode = isWatchMode
+                    )
+                }
+                is MarkdownBlock.HorizontalRule -> {
+                    HorizontalDivider(
+                        color = DarkBorder,
+                        thickness = 1.dp,
+                        modifier = Modifier.padding(vertical = if (isWatchMode) 4.dp else 8.dp)
                     )
                 }
                 is MarkdownBlock.Header -> {
@@ -76,10 +130,12 @@ fun MarkdownViewer(
                         fontSize = when (block.level) {
                             1 -> if (isWatchMode) 16.sp else 20.sp
                             2 -> if (isWatchMode) 14.5.sp else 18.sp
-                            else -> if (isWatchMode) 13.5.sp else 16.sp
+                            3 -> if (isWatchMode) 13.5.sp else 16.sp
+                            4 -> if (isWatchMode) 12.5.sp else 14.5.sp
+                            else -> if (isWatchMode) 12.sp else 13.5.sp
                         },
-                        fontWeight = FontWeight.Bold,
-                        color = NovaPrimary,
+                        fontWeight = if (block.level <= 3) FontWeight.Bold else FontWeight.SemiBold,
+                        color = if (block.level <= 3) NovaPrimary else Color(0xFF7DD3FC),
                         modifier = Modifier.padding(top = 4.dp, bottom = 2.dp)
                     )
                 }
@@ -146,9 +202,9 @@ private fun CodeBlockCard(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = language.ifBlank { "code" },
+                text = language.ifEmpty { "code" },
                 color = TextSecondary,
-                fontSize = 12.sp,
+                fontSize = 11.sp,
                 fontFamily = FontFamily.Monospace
             )
             IconButton(
@@ -178,55 +234,25 @@ private fun CodeBlockCard(
     }
 }
 
+/**
+ * Clean mathematical display equation block without code block background or "formula" headers.
+ * Has extra vertical padding (min 8dp) so numerators and high fractions (\frac{6}{3} = 2) are never cut off.
+ */
 @Composable
-private fun MathBlockCard(
+private fun MathDisplayBlock(
     formula: String,
-    isWatchMode: Boolean,
-    onCopy: () -> Unit
+    isWatchMode: Boolean
 ) {
     val scrollState = rememberScrollState()
 
-    Column(
+    Box(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(8.dp))
-            .background(Color(0xFF0F172A))
-            .border(1.dp, DarkBorder, RoundedCornerShape(8.dp))
-            .padding(horizontal = if (isWatchMode) 8.dp else 12.dp, vertical = if (isWatchMode) 6.dp else 8.dp)
+            .padding(vertical = if (isWatchMode) 6.dp else 10.dp)
+            .horizontalScroll(scrollState),
+        contentAlignment = Alignment.Center
     ) {
-        // Header with copy button
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = "formula",
-                color = NovaPrimary.copy(alpha = 0.75f),
-                fontSize = if (isWatchMode) 10.sp else 11.sp,
-                fontFamily = FontFamily.Monospace
-            )
-            IconButton(
-                onClick = onCopy,
-                modifier = Modifier.size(if (isWatchMode) 22.dp else 26.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.ContentCopy,
-                    contentDescription = "Copy formula",
-                    tint = TextSecondary,
-                    modifier = Modifier.size(if (isWatchMode) 12.dp else 14.dp)
-                )
-            }
-        }
-
-        // Horizontal scroll container so long formulas are fully viewable without clipping
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .horizontalScroll(scrollState)
-                .padding(vertical = if (isWatchMode) 4.dp else 6.dp),
-            contentAlignment = Alignment.Center
-        ) {
+        Box(modifier = Modifier.padding(top = 6.dp, bottom = 6.dp, start = 8.dp, end = 8.dp)) {
             RenderMathBlockContent(formula = formula, isWatchMode = isWatchMode)
         }
     }
@@ -243,7 +269,7 @@ private fun RenderMathBlockContent(formula: String, isWatchMode: Boolean) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.Center,
-            modifier = Modifier.padding(4.dp)
+            modifier = Modifier.padding(vertical = 6.dp, horizontal = 4.dp)
         ) {
             Text(
                 text = "{",
@@ -267,7 +293,8 @@ private fun RenderMathBlockContent(formula: String, isWatchMode: Boolean) {
         val lines = clean.split("\\\\").map { it.trim() }.filter { it.isNotEmpty() }
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(6.dp)
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+            modifier = Modifier.padding(vertical = 4.dp)
         ) {
             for (line in lines) {
                 RenderMathFormulaSegments(formula = line, isWatchMode = isWatchMode)
@@ -276,8 +303,10 @@ private fun RenderMathBlockContent(formula: String, isWatchMode: Boolean) {
         return
     }
 
-    // 3. Single equation with segments (fractions, roots, text)
-    RenderMathFormulaSegments(formula = clean, isWatchMode = isWatchMode)
+    // 3. Single equation with segments (fractions, roots, text, tall brackets)
+    Box(modifier = Modifier.padding(vertical = 4.dp)) {
+        RenderMathFormulaSegments(formula = clean, isWatchMode = isWatchMode)
+    }
 }
 
 @Composable
@@ -289,79 +318,263 @@ private fun RenderMathFormulaSegments(formula: String, isWatchMode: Boolean) {
         horizontalArrangement = Arrangement.Center
     ) {
         for (seg in segments) {
-            when (seg) {
-                is MathSegment.TextSeg -> {
+            RenderSingleSegment(seg, isWatchMode)
+        }
+    }
+}
+
+@Composable
+private fun RenderSingleSegment(seg: MathSegment, isWatchMode: Boolean) {
+    when (seg) {
+        is MathSegment.TextSeg -> {
+            Text(
+                text = formatMathAnnotated(seg.text, isWatchMode),
+                fontSize = if (isWatchMode) 13.5.sp else 15.5.sp,
+                color = TextPrimary
+            )
+        }
+        is MathSegment.FractionSeg -> {
+            // Mixed fraction: integer part and fraction are on the exact same horizontal line in an unbreakable Row
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center,
+                modifier = Modifier.padding(horizontal = 2.dp)
+            ) {
+                if (!seg.integerPart.isNullOrBlank()) {
                     Text(
-                        text = formatMathAnnotated(seg.text, isWatchMode),
+                        text = formatMathAnnotated(seg.integerPart, isWatchMode),
                         fontSize = if (isWatchMode) 13.5.sp else 15.5.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = TextPrimary,
+                        modifier = Modifier.padding(end = 3.dp)
+                    )
+                }
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier.padding(horizontal = 2.dp, vertical = 2.dp)
+                ) {
+                    Text(
+                        text = formatMathAnnotated(seg.numerator, isWatchMode),
+                        fontSize = if (isWatchMode) 12.sp else 14.sp,
+                        color = TextPrimary,
+                        textAlign = TextAlign.Center,
+                        lineHeight = if (isWatchMode) 16.sp else 18.sp,
+                        modifier = Modifier.padding(top = 6.dp, bottom = 2.dp) // padding top 6dp eliminates clipping of numerators
+                    )
+                    Box(
+                        modifier = Modifier
+                            .padding(vertical = 2.dp)
+                            .widthIn(min = 18.dp)
+                            .height(1.5.dp)
+                            .background(NovaPrimary)
+                    )
+                    Text(
+                        text = formatMathAnnotated(seg.denominator, isWatchMode),
+                        fontSize = if (isWatchMode) 12.sp else 14.sp,
+                        color = TextPrimary,
+                        textAlign = TextAlign.Center,
+                        lineHeight = if (isWatchMode) 16.sp else 18.sp,
+                        modifier = Modifier.padding(top = 2.dp, bottom = 4.dp)
+                    )
+                }
+            }
+        }
+        is MathSegment.SqrtSeg -> {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(horizontal = 2.dp, vertical = 2.dp)
+            ) {
+                if (!seg.degree.isNullOrBlank()) {
+                    Text(
+                        text = seg.degree,
+                        fontSize = if (isWatchMode) 8.sp else 9.5.sp,
+                        color = NovaPrimary,
+                        modifier = Modifier.offset(y = (-5).dp)
+                    )
+                }
+                Text(
+                    text = "√",
+                    fontSize = if (isWatchMode) 17.sp else 20.sp,
+                    fontWeight = FontWeight.Light,
+                    color = NovaPrimary,
+                    modifier = Modifier.padding(end = 1.dp)
+                )
+                Box(
+                    modifier = Modifier
+                        .drawBehind {
+                            drawLine(
+                                color = NovaPrimary,
+                                start = Offset(0f, 0f),
+                                end = Offset(size.width, 0f),
+                                strokeWidth = 1.5.dp.toPx()
+                            )
+                        }
+                        .padding(top = 4.dp, start = 2.dp, end = 2.dp)
+                ) {
+                    Text(
+                        text = formatMathAnnotated(seg.radicand, isWatchMode),
+                        fontSize = if (isWatchMode) 13.sp else 14.5.sp,
                         color = TextPrimary
                     )
                 }
-                is MathSegment.FractionSeg -> {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier.padding(horizontal = 4.dp)
-                    ) {
-                        Text(
-                            text = formatMathAnnotated(seg.numerator, isWatchMode),
-                            fontSize = if (isWatchMode) 12.sp else 14.sp,
-                            color = TextPrimary,
-                            textAlign = TextAlign.Center
-                        )
-                        Box(
-                            modifier = Modifier
-                                .padding(vertical = 2.dp)
-                                .widthIn(min = 18.dp)
-                                .height(1.5.dp)
-                                .background(NovaPrimary)
-                        )
-                        Text(
-                            text = formatMathAnnotated(seg.denominator, isWatchMode),
-                            fontSize = if (isWatchMode) 12.sp else 14.sp,
-                            color = TextPrimary,
-                            textAlign = TextAlign.Center
-                        )
+            }
+        }
+        is MathSegment.BracketSeg -> {
+            // Tall brackets dynamically stretched to the height of enclosed content
+            Row(
+                modifier = Modifier.height(IntrinsicSize.Min),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                TallBracket(
+                    bracketChar = seg.openChar,
+                    isWatchMode = isWatchMode,
+                    modifier = Modifier.fillMaxHeight()
+                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center,
+                    modifier = Modifier.padding(horizontal = 2.dp)
+                ) {
+                    for (inner in seg.innerSegments) {
+                        RenderSingleSegment(inner, isWatchMode)
                     }
                 }
-                is MathSegment.SqrtSeg -> {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.padding(horizontal = 2.dp)
-                    ) {
-                        if (!seg.degree.isNullOrBlank()) {
-                            Text(
-                                text = seg.degree,
-                                fontSize = if (isWatchMode) 8.sp else 9.5.sp,
-                                color = NovaPrimary,
-                                modifier = Modifier.offset(y = (-5).dp)
-                            )
-                        }
-                        Text(
-                            text = "√",
-                            fontSize = if (isWatchMode) 17.sp else 20.sp,
-                            fontWeight = FontWeight.Light,
-                            color = NovaPrimary,
-                            modifier = Modifier.padding(end = 1.dp)
+                TallBracket(
+                    bracketChar = seg.closeChar,
+                    isWatchMode = isWatchMode,
+                    modifier = Modifier.fillMaxHeight()
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun TallBracket(
+    bracketChar: Char,
+    isWatchMode: Boolean,
+    modifier: Modifier = Modifier
+) {
+    if (bracketChar == ' ') return
+
+    val bracketColor = NovaPrimary
+    val strokeWidth = if (isWatchMode) 1.5.dp else 1.8.dp
+    val bracketWidth = if (isWatchMode) 7.dp else 9.dp
+
+    Box(
+        modifier = modifier
+            .width(bracketWidth)
+            .padding(vertical = 1.dp)
+    ) {
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val sw = strokeWidth.toPx()
+            val w = size.width
+            val h = size.height
+            if (w <= 0f || h <= 0f) return@Canvas
+
+            when (bracketChar) {
+                '(' -> {
+                    val path = Path().apply {
+                        moveTo(w * 0.85f, 0f)
+                        cubicTo(
+                            w * 0.1f, h * 0.25f,
+                            w * 0.1f, h * 0.75f,
+                            w * 0.85f, h
                         )
-                        Box(
-                            modifier = Modifier
-                                .drawBehind {
-                                    drawLine(
-                                        color = NovaPrimary,
-                                        start = Offset(0f, 0f),
-                                        end = Offset(size.width, 0f),
-                                        strokeWidth = 1.5.dp.toPx()
-                                    )
-                                }
-                                .padding(top = 3.dp, start = 2.dp, end = 2.dp)
-                        ) {
-                            Text(
-                                text = formatMathAnnotated(seg.radicand, isWatchMode),
-                                fontSize = if (isWatchMode) 13.sp else 14.5.sp,
-                                color = TextPrimary
-                            )
-                        }
                     }
+                    drawPath(
+                        path = path,
+                        color = bracketColor,
+                        style = Stroke(width = sw, cap = StrokeCap.Round)
+                    )
+                }
+                ')' -> {
+                    val path = Path().apply {
+                        moveTo(w * 0.15f, 0f)
+                        cubicTo(
+                            w * 0.9f, h * 0.25f,
+                            w * 0.9f, h * 0.75f,
+                            w * 0.15f, h
+                        )
+                    }
+                    drawPath(
+                        path = path,
+                        color = bracketColor,
+                        style = Stroke(width = sw, cap = StrokeCap.Round)
+                    )
+                }
+                '[' -> {
+                    val path = Path().apply {
+                        moveTo(w * 0.85f, 0f)
+                        lineTo(w * 0.2f, 0f)
+                        lineTo(w * 0.2f, h)
+                        lineTo(w * 0.85f, h)
+                    }
+                    drawPath(
+                        path = path,
+                        color = bracketColor,
+                        style = Stroke(width = sw, cap = StrokeCap.Square)
+                    )
+                }
+                ']' -> {
+                    val path = Path().apply {
+                        moveTo(w * 0.15f, 0f)
+                        lineTo(w * 0.8f, 0f)
+                        lineTo(w * 0.8f, h)
+                        lineTo(w * 0.15f, h)
+                    }
+                    drawPath(
+                        path = path,
+                        color = bracketColor,
+                        style = Stroke(width = sw, cap = StrokeCap.Square)
+                    )
+                }
+                '{' -> {
+                    val path = Path().apply {
+                        moveTo(w * 0.85f, 0f)
+                        cubicTo(w * 0.3f, 0f, w * 0.3f, h * 0.45f, w * 0.1f, h * 0.5f)
+                        cubicTo(w * 0.3f, h * 0.55f, w * 0.3f, h, w * 0.85f, h)
+                    }
+                    drawPath(
+                        path = path,
+                        color = bracketColor,
+                        style = Stroke(width = sw, cap = StrokeCap.Round)
+                    )
+                }
+                '}' -> {
+                    val path = Path().apply {
+                        moveTo(w * 0.15f, 0f)
+                        cubicTo(w * 0.7f, 0f, w * 0.7f, h * 0.45f, w * 0.9f, h * 0.5f)
+                        cubicTo(w * 0.7f, h * 0.55f, w * 0.7f, h, w * 0.15f, h)
+                    }
+                    drawPath(
+                        path = path,
+                        color = bracketColor,
+                        style = Stroke(width = sw, cap = StrokeCap.Round)
+                    )
+                }
+                '|' -> {
+                    drawLine(
+                        color = bracketColor,
+                        start = Offset(w / 2f, 0f),
+                        end = Offset(w / 2f, h),
+                        strokeWidth = sw
+                    )
+                }
+                else -> {
+                    val path = Path().apply {
+                        moveTo(w * 0.85f, 0f)
+                        cubicTo(
+                            w * 0.1f, h * 0.25f,
+                            w * 0.1f, h * 0.75f,
+                            w * 0.85f, h
+                        )
+                    }
+                    drawPath(
+                        path = path,
+                        color = bracketColor,
+                        style = Stroke(width = sw, cap = StrokeCap.Round)
+                    )
                 }
             }
         }
@@ -370,8 +583,9 @@ private fun RenderMathFormulaSegments(formula: String, isWatchMode: Boolean) {
 
 private sealed class MathSegment {
     data class TextSeg(val text: String) : MathSegment()
-    data class FractionSeg(val numerator: String, val denominator: String) : MathSegment()
+    data class FractionSeg(val integerPart: String? = null, val numerator: String, val denominator: String) : MathSegment()
     data class SqrtSeg(val degree: String?, val radicand: String) : MathSegment()
+    data class BracketSeg(val openChar: Char, val closeChar: Char, val innerSegments: List<MathSegment>) : MathSegment()
 }
 
 private fun parseFormulaSegments(raw: String): List<MathSegment> {
@@ -381,6 +595,92 @@ private fun parseFormulaSegments(raw: String): List<MathSegment> {
     val textBuf = StringBuilder()
 
     while (pos < s.length) {
+        // 1. \left( ... \right) or \left[ ... \right] or \left\{ ... \right\} or \left| ... \right|
+        if (s.startsWith("\\left", pos)) {
+            var afterLeft = pos + 5
+            var openChar = '('
+            if (afterLeft < s.length) {
+                if (s[afterLeft] == '\\' && afterLeft + 1 < s.length && (s[afterLeft + 1] == '{' || s[afterLeft + 1] == '}')) {
+                    openChar = '{'
+                    afterLeft += 2
+                } else if (s[afterLeft] in listOf('(', '[', '{', '|')) {
+                    openChar = s[afterLeft]
+                    afterLeft++
+                } else if (s[afterLeft] == '.') {
+                    openChar = ' '
+                    afterLeft++
+                }
+            }
+
+            var depth = 1
+            var j = afterLeft
+            var rightStart = -1
+            var closeChar = ')'
+            var afterRight = -1
+
+            while (j < s.length && depth > 0) {
+                if (s.startsWith("\\left", j)) {
+                    depth++
+                    j += 5
+                } else if (s.startsWith("\\right", j)) {
+                    depth--
+                    if (depth == 0) {
+                        rightStart = j
+                        if (j + 6 < s.length && s[j + 6] == '\\' && j + 7 < s.length && (s[j + 7] == '{' || s[j + 7] == '}')) {
+                            closeChar = '}'
+                            afterRight = j + 8
+                        } else if (j + 6 < s.length && s[j + 6] in listOf(')', ']', '}', '|')) {
+                            closeChar = s[j + 6]
+                            afterRight = j + 7
+                        } else if (j + 6 < s.length && s[j + 6] == '.') {
+                            closeChar = ' '
+                            afterRight = j + 7
+                        } else {
+                            closeChar = ')'
+                            afterRight = j + 6
+                        }
+                        break
+                    }
+                    j += 6
+                } else {
+                    j++
+                }
+            }
+
+            if (rightStart != -1 && afterRight != -1) {
+                if (textBuf.isNotEmpty()) {
+                    segments.add(MathSegment.TextSeg(textBuf.toString()))
+                    textBuf.clear()
+                }
+                val innerText = s.substring(afterLeft, rightStart)
+                val innerSegments = parseFormulaSegments(innerText)
+                segments.add(MathSegment.BracketSeg(openChar, closeChar, innerSegments))
+                pos = afterRight
+                continue
+            }
+        }
+
+        // 2. Regular brackets around fractions: ( ... \frac ... ) or [ ... \frac ... ]
+        if ((s[pos] == '(' || s[pos] == '[') && pos + 1 < s.length) {
+            val openCh = s[pos]
+            val closeCh = if (openCh == '(') ')' else ']'
+            val closeIdx = findMatchingChar(s, pos, openCh, closeCh)
+            if (closeIdx != -1) {
+                val inner = s.substring(pos + 1, closeIdx)
+                if (inner.contains("\\frac") || inner.contains("\\dfrac") || inner.contains("\\tfrac")) {
+                    if (textBuf.isNotEmpty()) {
+                        segments.add(MathSegment.TextSeg(textBuf.toString()))
+                        textBuf.clear()
+                    }
+                    val innerSegments = parseFormulaSegments(inner)
+                    segments.add(MathSegment.BracketSeg(openCh, closeCh, innerSegments))
+                    pos = closeIdx + 1
+                    continue
+                }
+            }
+        }
+
+        // 3. Fraction: \frac{num}{den}, \dfrac{num}{den}, \tfrac{num}{den}
         if (s.startsWith("\\frac", pos) || s.startsWith("\\dfrac", pos) || s.startsWith("\\tfrac", pos)) {
             val isFrac = s.startsWith("\\frac", pos)
             val prefixLen = if (isFrac) 5 else 6
@@ -392,20 +692,37 @@ private fun parseFormulaSegments(raw: String): List<MathSegment> {
                     if (openDen != -1) {
                         val closeDen = findMatchingBrace(s, openDen)
                         if (closeDen != -1) {
-                            if (textBuf.isNotEmpty()) {
+                            // Check if textBuf ends with an integer part for mixed fraction (e.g. 2\frac{3}{5} or 5 \frac{1}{12})
+                            val currentText = textBuf.toString()
+                            val intMatch = Regex("""(?:^|(?<=[^0-9a-zA-Z]))(\d+)\s*$""").find(currentText)
+                            var integerPart: String? = null
+
+                            if (intMatch != null) {
+                                val matchStart = intMatch.range.first
+                                val preText = currentText.substring(0, matchStart)
+                                if (preText.isNotEmpty()) {
+                                    segments.add(MathSegment.TextSeg(preText))
+                                }
+                                integerPart = intMatch.groupValues[1]
+                                textBuf.clear()
+                            } else if (textBuf.isNotEmpty()) {
                                 segments.add(MathSegment.TextSeg(textBuf.toString()))
                                 textBuf.clear()
                             }
+
                             val num = s.substring(openNum + 1, closeNum)
                             val den = s.substring(openDen + 1, closeDen)
-                            segments.add(MathSegment.FractionSeg(num, den))
+                            segments.add(MathSegment.FractionSeg(integerPart, num, den))
                             pos = closeDen + 1
                             continue
                         }
                     }
                 }
             }
-        } else if (s.startsWith("\\sqrt", pos)) {
+        }
+
+        // 4. Square roots \sqrt[n]{x}
+        else if (s.startsWith("\\sqrt", pos)) {
             var afterSqrt = pos + 5
             var degree: String? = null
             if (afterSqrt < s.length && s[afterSqrt] == '[') {
@@ -442,6 +759,17 @@ private fun parseFormulaSegments(raw: String): List<MathSegment> {
     return segments
 }
 
+private fun findMatchingChar(text: String, openPos: Int, openCh: Char, closeCh: Char): Int {
+    var depth = 1
+    var i = openPos + 1
+    while (i < text.length && depth > 0) {
+        if (text[i] == openCh) depth++
+        else if (text[i] == closeCh) depth--
+        i++
+    }
+    return if (depth == 0) i - 1 else -1
+}
+
 private fun findMatchingBrace(text: String, openPos: Int): Int {
     var depth = 1
     var i = openPos + 1
@@ -459,6 +787,7 @@ private sealed class MarkdownBlock {
     data class CodeBlock(val language: String, val code: String) : MarkdownBlock()
     data class BulletPoint(val text: String, val number: Int? = null) : MarkdownBlock()
     data class MathBlock(val formula: String) : MarkdownBlock()
+    data class HorizontalRule(val dummy: Unit = Unit) : MarkdownBlock()
 }
 
 private fun parseMarkdownBlocks(raw: String): List<MarkdownBlock> {
@@ -474,7 +803,7 @@ private fun parseMarkdownBlocks(raw: String): List<MarkdownBlock> {
     for (line in lines) {
         val trimmed = line.trim()
 
-        // 1. Code Block toggle
+        // 1. Code Block toggle (```)
         if (trimmed.startsWith("```")) {
             if (inCodeBlock) {
                 blocks.add(MarkdownBlock.CodeBlock(codeLanguage, codeBuilder.toString().trimEnd()))
@@ -534,15 +863,25 @@ private fun parseMarkdownBlocks(raw: String): List<MarkdownBlock> {
             continue
         }
 
-        // 4. Headers
-        if (trimmed.startsWith("# ")) {
-            blocks.add(MarkdownBlock.Header(1, trimmed.removePrefix("# ").trim()))
-        } else if (trimmed.startsWith("## ")) {
-            blocks.add(MarkdownBlock.Header(2, trimmed.removePrefix("## ").trim()))
-        } else if (trimmed.startsWith("### ")) {
-            blocks.add(MarkdownBlock.Header(3, trimmed.removePrefix("### ").trim()))
-        } else if (trimmed.startsWith("- ") || trimmed.startsWith("* ")) {
-            blocks.add(MarkdownBlock.BulletPoint(trimmed.substring(2).trim(), null))
+        // 4. Horizontal rule (---, ***, ___)
+        if (Regex("""^(\-{3,}|\*{3,}|_{3,})$""").matches(trimmed)) {
+            blocks.add(MarkdownBlock.HorizontalRule())
+            continue
+        }
+
+        // 5. Headers 1 to 6 (# to ######)
+        val headerMatch = Regex("""^(#{1,6})\s+(.*)""").find(trimmed)
+        if (headerMatch != null) {
+            val level = headerMatch.groupValues[1].length
+            val title = headerMatch.groupValues[2].trim()
+            blocks.add(MarkdownBlock.Header(level, title))
+            continue
+        }
+
+        // 6. Lists
+        if (trimmed.startsWith("- ") || trimmed.startsWith("* ") || trimmed.startsWith("• ")) {
+            val itemText = trimmed.replace(Regex("""^[-*•]\s+"""), "")
+            blocks.add(MarkdownBlock.BulletPoint(itemText, null))
         } else if (Regex("""^\d+\.\s""").containsMatchIn(trimmed)) {
             val numMatch = Regex("""^(\d+)\.\s+(.*)""").find(trimmed)
             if (numMatch != null) {
@@ -569,14 +908,18 @@ private fun parseMarkdownBlocks(raw: String): List<MarkdownBlock> {
 
 private fun isFreestandingFormulaLine(line: String): Boolean {
     val t = line.trim()
-    if (t.length < 4) return false
+    if (t.length < 3) return false
     val mathKeywords = listOf(
-        "\\frac{", "\\dfrac{", "\\sqrt{", "\\begin{cases}",
-        "\\sum_{", "\\int_{", "\\prod_{", "\\lim_{"
+        "\\frac{", "\\dfrac{", "\\tfrac{", "\\sqrt{", "\\begin{cases}",
+        "\\sum_{", "\\int_{", "\\prod_{", "\\lim_{", "\\left(", "\\left[", "\\left\\{"
     )
     if (mathKeywords.any { t.startsWith(it) }) {
         val letterWords = t.split(Regex("""\s+""")).filter { w -> w.all { it.isLetter() } && w.length > 2 }
         return letterWords.size <= 1
+    }
+    // Mixed fractions on their own line e.g. "2\frac{3}{5}" or "x = 2\frac{3}{5}"
+    if (Regex("""^(?:[a-zA-Z]\s*=\s*)?(\d+\s*)?\\(?:frac|dfrac|tfrac)\{""").containsMatchIn(t)) {
+        return true
     }
     return false
 }
@@ -602,22 +945,20 @@ fun isMathExpression(raw: String): Boolean {
     val lower = clean.lowercase()
     val nonMathWords = listOf("or", "and", "to", "for", "each", "per", "cost", "или", "до", "и", "по", "за", "рублей", "долларов")
     val hasNonMathWord = nonMathWords.any { Regex("""(^|\s)$it(\s|$)""", RegexOption.IGNORE_CASE).containsMatchIn(lower) }
-    val hasMathSymbols = Regex("""[=+\-*\/<>±×÷√≈≠≤≥≡∼∝→⇒^_{}\\]""").containsMatchIn(clean)
+    val hasMathSymbols = Regex("""[=+\-*\/<>±×÷√≈≠≤≥≡∼∝→⇒↑↓↕^_{}\\]""").containsMatchIn(clean)
     if (hasNonMathWord && !hasMathSymbols) {
         return false
     }
 
     // 2. Math indicators:
     if (clean.contains('\\')) return true
-
-    if (Regex("""[=+\-*\/<>±×÷√≈≠≤≥≡∼∝→⇒]""").containsMatchIn(clean)) return true
-
+    if (Regex("""[=+\-*\/<>±×÷√≈≠≤≥≡∼∝→⇒↑↓↕]""").containsMatchIn(clean)) return true
     if (clean.contains('^') || clean.contains('_') || clean.contains('{')) return true
 
     // Single math variable or function with question mark: x, y, z, v, F, a, t, f(x), v = ?
     if (clean.matches(Regex("""^[a-zA-Zα-ωΑ-Ω](\([a-zA-Z0-9,\s]+\))?(\s*[?])?$"""))) return true
 
-    // Math expression like "v = 10 м/с" or "10 м/с" with units after an equal sign or variable
+    // Math expression like "v = 10 м/с" or "A \to B"
     if (Regex("""^[a-zA-Zα-ωΑ-Ω]\s*=""").containsMatchIn(clean)) return true
 
     return false
@@ -679,7 +1020,7 @@ private fun parseInlineMarkdown(text: String, isWatchMode: Boolean = false): Ann
                     continue
                 }
             }
-            // 3. Inline math: $$...$$ inside paragraph (e.g. "Решение: $$v = 6$$")
+            // 3. Inline math: $$...$$ inside paragraph
             else if (i + 1 < text.length && text[i] == '$' && text[i + 1] == '$') {
                 val end = text.indexOf("$$", i + 2)
                 if (end != -1) {
@@ -747,9 +1088,9 @@ private fun parseInlineMarkdown(text: String, isWatchMode: Boolean = false): Ann
                     }
                 }
             }
-            // 7. Raw inline LaTeX commands like \frac{4}{18}, \sqrt{...}, \approx, \alpha outside delimiters
+            // 7. Raw inline LaTeX commands like \frac{4}{18}, \sqrt{...}, \to, \alpha outside delimiters
             else if (text[i] == '\\' && i + 1 < text.length && text[i + 1].isLetter()) {
-                val cmdMatch = Regex("""^\\(frac|dfrac|tfrac|sqrt|approx|neq|le|ge|pm|times|cdot|alpha|beta|gamma|delta|pi|theta|lambda|sigma|omega|Delta|Sigma|Omega|text)\b""").find(text.substring(i))
+                val cmdMatch = Regex("""^\\(frac|dfrac|tfrac|sqrt|approx|neq|le|ge|pm|times|cdot|to|alpha|beta|gamma|delta|pi|theta|lambda|sigma|omega|Delta|Sigma|Omega|text)\b""").find(text.substring(i))
                 if (cmdMatch != null) {
                     val expr = extractFullLatexExpression(text, i)
                     if (expr.isNotEmpty()) {
@@ -783,102 +1124,118 @@ private fun extractFullLatexExpression(text: String, start: Int): String {
 
 /**
  * Converts LaTeX formulas to formatted AnnotatedString with superscripts, subscripts, Greek letters and math symbols
+ * Implements soft error handling (throwOnError: false equivalent) so unknown macros or invalid inputs never crash
  */
 fun formatMathAnnotated(rawMath: String, isWatchMode: Boolean = false): AnnotatedString {
-    var s = cleanMathFormula(rawMath)
+    try {
+        var s = cleanMathFormula(rawMath)
 
-    // 1. Replace \text{...} and \mathrm{...} preserving inner text
-    s = s.replace(Regex("""\\(?:text|mathrm|mathbf|mathit|operatorname)\{([^{}]+)\}""")) { it.groupValues[1] }
+        // 1. Replace \text{...} and \mathrm{...} preserving inner text
+        s = s.replace(Regex("""\\(?:text|mathrm|mathbf|mathit|operatorname)\{([^{}]+)\}""")) { it.groupValues[1] }
 
-    // 2. Replace Greek letters and math symbols
-    for ((sym, rep) in MATH_SYMBOLS) {
-        s = s.replace(sym, rep)
-    }
-
-    // 3. Replace common math functions
-    s = s.replace(Regex("""\\(sin|cos|tan|cot|sec|csc|ln|log|exp|lim|max|min|det)\b""")) { it.groupValues[1] }
-
-    // 4. Remove \left and \right delimiters
-    s = s.replace(Regex("""\\left([(\[{|])""")) { it.groupValues[1] }
-    s = s.replace(Regex("""\\right([)\]}|])""")) { it.groupValues[1] }
-    s = s.replace("\\{", "{").replace("\\}", "}")
-    s = s.replace("\\.", "").replace("\\,", " ").replace("\\;", " ").replace("\\quad", "  ").replace("\\qquad", "    ")
-
-    // 5. Replace \frac{a}{b} in inline context with clean fraction format
-    while (s.contains("\\frac") || s.contains("\\dfrac") || s.contains("\\tfrac")) {
-        val match = Regex("""\\(?:frac|dfrac|tfrac)\{([^{}]+)\}\{([^{}]+)\}""").find(s) ?: break
-        val num = match.groupValues[1]
-        val den = match.groupValues[2]
-        val fracStr = if (num.length <= 2 && den.length <= 2 && num.all { it.isDigit() } && den.all { it.isDigit() }) {
-            toSuperscript(num) + "⁄" + toSubscript(den)
-        } else {
-            "($num / $den)"
+        // 2. Replace Greek letters and math symbols with word-boundary check for alpha LaTeX commands
+        for ((sym, rep) in MATH_SYMBOLS) {
+            if (sym.startsWith("\\") && sym.length > 1 && sym.substring(1).all { it.isLetter() }) {
+                s = s.replace(Regex(Regex.escape(sym) + """(?![a-zA-Z])"""), rep)
+            } else {
+                s = s.replace(sym, rep)
+            }
         }
-        s = s.substring(0, match.range.first) + fracStr + s.substring(match.range.last + 1)
-    }
 
-    // 6. Replace \sqrt[n]{x}
-    while (s.contains("\\sqrt")) {
-        val degMatch = Regex("""\\sqrt\[([^\]]+)\]\{([^{}]+)\}""").find(s)
-        if (degMatch != null) {
-            val deg = toSuperscript(degMatch.groupValues[1])
-            val rad = degMatch.groupValues[2]
-            s = s.substring(0, degMatch.range.first) + "${deg}√($rad)" + s.substring(degMatch.range.last + 1)
-            continue
+        // 3. Replace common math functions
+        s = s.replace(Regex("""\\(sin|cos|tan|cot|sec|csc|ln|log|exp|lim|max|min|det)\b""")) { it.groupValues[1] }
+
+        // 4. Remove \left and \right delimiters (do not leave \left or \right as text)
+        s = s.replace(Regex("""\\left([(\[{|.])""")) { if (it.groupValues[1] == ".") "" else it.groupValues[1] }
+        s = s.replace(Regex("""\\right([)\]}|.])""")) { if (it.groupValues[1] == ".") "" else it.groupValues[1] }
+        s = s.replace(Regex("""\\(?:left|right)\b"""), "")
+        s = s.replace("\\{", "{").replace("\\}", "}")
+        s = s.replace("\\.", "").replace("\\,", " ").replace("\\;", " ").replace("\\quad", "  ").replace("\\qquad", "    ")
+
+        // 5. Replace \frac{a}{b} in inline context with clean fraction format, supporting mixed fractions (e.g. 2\frac{3}{5})
+        while (s.contains("\\frac") || s.contains("\\dfrac") || s.contains("\\tfrac")) {
+            val match = Regex("""(?:(\d+)\s*)?\\(?:frac|dfrac|tfrac)\{([^{}]+)\}\{([^{}]+)\}""").find(s) ?: break
+            val intPart = match.groupValues[1]
+            val num = match.groupValues[2]
+            val den = match.groupValues[3]
+            val fracStr = if (num.length <= 2 && den.length <= 2 && num.all { it.isDigit() } && den.all { it.isDigit() }) {
+                (if (intPart.isNotEmpty()) intPart + "\u00A0" else "") + toSuperscript(num) + "⁄" + toSubscript(den)
+            } else {
+                (if (intPart.isNotEmpty()) intPart + "\u00A0" else "") + "($num / $den)"
+            }
+            s = s.substring(0, match.range.first) + fracStr + s.substring(match.range.last + 1)
         }
-        val simpleMatch = Regex("""\\sqrt\{([^{}]+)\}""").find(s)
-        if (simpleMatch != null) {
-            val rad = simpleMatch.groupValues[1]
-            s = s.substring(0, simpleMatch.range.first) + "√($rad)" + s.substring(simpleMatch.range.last + 1)
-            continue
-        }
-        break
-    }
 
-    // 7. Parse superscripts (^) and subscripts (_) into Compose AnnotatedString with distinct math styling
-    return buildAnnotatedString {
-        var idx = 0
-        val mathColor = Color(0xFF38BDF8)
-
-        while (idx < s.length) {
-            val c = s[idx]
-            if (c == '^') {
-                idx++
-                val (superText, nextIdx) = extractSuperOrSubArg(s, idx)
-                withStyle(
-                    SpanStyle(
-                        baselineShift = BaselineShift.Superscript,
-                        fontSize = if (isWatchMode) 9.sp else 10.5.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = mathColor
-                    )
-                ) {
-                    append(superText)
-                }
-                idx = nextIdx
-                continue
-            } else if (c == '_') {
-                idx++
-                val (subText, nextIdx) = extractSuperOrSubArg(s, idx)
-                withStyle(
-                    SpanStyle(
-                        baselineShift = BaselineShift.Subscript,
-                        fontSize = if (isWatchMode) 9.sp else 10.5.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = mathColor
-                    )
-                ) {
-                    append(subText)
-                }
-                idx = nextIdx
+        // 6. Replace \sqrt[n]{x}
+        while (s.contains("\\sqrt")) {
+            val degMatch = Regex("""\\sqrt\[([^\]]+)\]\{([^{}]+)\}""").find(s)
+            if (degMatch != null) {
+                val deg = toSuperscript(degMatch.groupValues[1])
+                val rad = degMatch.groupValues[2]
+                s = s.substring(0, degMatch.range.first) + "${deg}√($rad)" + s.substring(degMatch.range.last + 1)
                 continue
             }
-
-            // Math variables, operators and equations are given clean math styling
-            withStyle(SpanStyle(color = mathColor, fontWeight = FontWeight.Medium)) {
-                append(c)
+            val simpleMatch = Regex("""\\sqrt\{([^{}]+)\}""").find(s)
+            if (simpleMatch != null) {
+                val rad = simpleMatch.groupValues[1]
+                s = s.substring(0, simpleMatch.range.first) + "√($rad)" + s.substring(simpleMatch.range.last + 1)
+                continue
             }
-            idx++
+            break
+        }
+
+        // 7. Parse superscripts (^) and subscripts (_) into Compose AnnotatedString with distinct math styling
+        return buildAnnotatedString {
+            var idx = 0
+            val mathColor = Color(0xFF38BDF8)
+
+            while (idx < s.length) {
+                val c = s[idx]
+                if (c == '^') {
+                    idx++
+                    val (superText, nextIdx) = extractSuperOrSubArg(s, idx)
+                    withStyle(
+                        SpanStyle(
+                            baselineShift = BaselineShift.Superscript,
+                            fontSize = if (isWatchMode) 9.sp else 10.5.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = mathColor
+                        )
+                    ) {
+                        append(superText)
+                    }
+                    idx = nextIdx
+                    continue
+                } else if (c == '_') {
+                    idx++
+                    val (subText, nextIdx) = extractSuperOrSubArg(s, idx)
+                    withStyle(
+                        SpanStyle(
+                            baselineShift = BaselineShift.Subscript,
+                            fontSize = if (isWatchMode) 9.sp else 10.5.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = mathColor
+                        )
+                    ) {
+                        append(subText)
+                    }
+                    idx = nextIdx
+                    continue
+                }
+
+                // Math variables, operators and equations are given clean math styling
+                withStyle(SpanStyle(color = mathColor, fontWeight = FontWeight.Medium)) {
+                    append(c)
+                }
+                idx++
+            }
+        }
+    } catch (e: Exception) {
+        // Soft error fallback
+        return buildAnnotatedString {
+            withStyle(SpanStyle(color = Color(0xFF38BDF8))) {
+                append(rawMath)
+            }
         }
     }
 }
@@ -1007,6 +1364,24 @@ private val MATH_SYMBOLS = listOf(
     "\\Leftarrow" to "⇐",
     "\\Leftrightarrow" to "⇔",
     "\\iff" to "⇔",
+    "\\longrightarrow" to "→",
+    "\\longleftarrow" to "←",
+    "\\longleftrightarrow" to "↔",
+    "\\Longrightarrow" to "⇒",
+    "\\Longleftarrow" to "⇐",
+    "\\Longleftrightarrow" to "⇔",
+    "\\uparrow" to "↑",
+    "\\downarrow" to "↓",
+    "\\updownarrow" to "↕",
+    "\\Uparrow" to "⇑",
+    "\\Downarrow" to "⇓",
+    "\\Updownarrow" to "⇕",
+    "\\nearrow" to "↗",
+    "\\searrow" to "↘",
+    "\\swarrow" to "↙",
+    "\\nwarrow" to "↖",
+    "\\mapsto" to "↦",
+    "\\longmapsto" to "⟼",
     "\\degree" to "°",
     "\\circ" to "°",
     "\\dots" to "…",

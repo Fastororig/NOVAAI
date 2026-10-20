@@ -531,7 +531,13 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             var streamSuccess = false
 
             try {
-                val history = currentMessages.filter { it.id != assistantMessage.id }
+                val allHistory = currentMessages.filter { it.id != assistantMessage.id }
+                val history = if (allHistory.size > 15) {
+                    val last15 = allHistory.takeLast(15)
+                    last15.dropWhile { it.role != MessageRole.USER }.ifEmpty { last15 }
+                } else {
+                    allHistory
+                }
                 apiService.generateContentStream(
                     apiKey = apiKey,
                     model = activeModel,
@@ -562,7 +568,13 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     preferences.selectedModel = UiGeminiModel.DEFAULT_MODEL_ID
 
                     try {
-                        val history = currentMessages.filter { it.id != assistantMessage.id }
+                        val allHistory = currentMessages.filter { it.id != assistantMessage.id }
+                        val history = if (allHistory.size > 15) {
+                            val last15 = allHistory.takeLast(15)
+                            last15.dropWhile { it.role != MessageRole.USER }.ifEmpty { last15 }
+                        } else {
+                            allHistory
+                        }
                         apiService.generateContentStream(
                             apiKey = apiKey,
                             model = activeModel,

@@ -31,7 +31,8 @@ data class FileDataItem(
 data class PartItem(
     @SerializedName("text") val text: String? = null,
     @SerializedName("inlineData") val inlineData: InlineDataItem? = null,
-    @SerializedName("fileData") val fileData: FileDataItem? = null
+    @SerializedName("fileData") val fileData: FileDataItem? = null,
+    @SerializedName("thought") val thought: Boolean? = null
 )
 
 data class SystemInstructionItem(
@@ -42,7 +43,12 @@ data class GenerationConfigItem(
     @SerializedName("temperature") val temperature: Float? = 0.7f,
     @SerializedName("topK") val topK: Int? = 40,
     @SerializedName("topP") val topP: Float? = 0.95f,
-    @SerializedName("maxOutputTokens") val maxOutputTokens: Int? = 4096
+    @SerializedName("maxOutputTokens") val maxOutputTokens: Int? = 4096,
+    @SerializedName("thinkingConfig") val thinkingConfig: ThinkingConfigItem? = null
+)
+
+data class ThinkingConfigItem(
+    @SerializedName("thinkingBudget") val thinkingBudget: Int = 0
 )
 
 // ==========================================

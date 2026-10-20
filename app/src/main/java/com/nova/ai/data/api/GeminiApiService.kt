@@ -1,5 +1,6 @@
 package com.nova.ai.data.api
 
+import android.util.Log
 import com.google.gson.Gson
 import com.nova.ai.data.model.*
 import kotlinx.coroutines.Dispatchers
@@ -228,9 +229,17 @@ class GeminiApiService {
                 if (pageCount > 10) break
             } while (!pageToken.isNullOrBlank())
 
-            // Filter models that support generateContent
+            // Filter models: keep only stable release flash & pro versions, exclude preview & customtools
             val validModels = allCollectedRemoteModels.filter { model ->
-                model.supportedGenerationMethods?.contains("generateContent") == true
+                val id = model.cleanId
+                val name = model.name ?: ""
+                val supportsGen = model.supportedGenerationMethods?.contains("generateContent") == true
+                val isFlashOrPro = id.contains("flash", ignoreCase = true) || id.contains("pro", ignoreCase = true) ||
+                                  name.contains("flash", ignoreCase = true) || name.contains("pro", ignoreCase = true)
+                val isExcluded = id.contains("preview", ignoreCase = true) || id.contains("customtools", ignoreCase = true) ||
+                                 name.contains("preview", ignoreCase = true) || name.contains("customtools", ignoreCase = true)
+
+                supportsGen && isFlashOrPro && !isExcluded
             }
 
             if (validModels.isEmpty()) {
@@ -274,10 +283,18 @@ class GeminiApiService {
             )
         }
 
+        // 3. Optimize history context: limit to last 15 messages (trim context)
+        val trimmedHistory = if (conversationHistory.size > 15) {
+            val last15 = conversationHistory.takeLast(15)
+            last15.dropWhile { it.role != MessageRole.USER }.ifEmpty { last15 }
+        } else {
+            conversationHistory
+        }
+
         // Map chat history to Gemini ContentItems (supporting text, inlineData, and fileData)
         val contents = mutableListOf<ContentItem>()
 
-        for (msg in conversationHistory) {
+        for (msg in trimmedHistory) {
             if (msg.role == MessageRole.ERROR) continue
 
             val parts = mutableListOf<PartItem>()
@@ -330,12 +347,14 @@ class GeminiApiService {
             SystemInstructionItem(parts = listOf(PartItem(text = systemInstruction.trim())))
         } else null
 
+        // 2. Disable thinking delay with thinkingBudget = 0 in generationConfig
         val requestPayload = GeminiGenerateRequest(
             contents = contents,
             systemInstruction = systemInst,
             generationConfig = GenerationConfigItem(
                 temperature = temperature.coerceIn(0.0f, 2.0f),
-                maxOutputTokens = 4096
+                maxOutputTokens = 4096,
+                thinkingConfig = ThinkingConfigItem(thinkingBudget = 0)
             )
         )
 
@@ -346,6 +365,10 @@ class GeminiApiService {
         // Ensure clean model ID without redundant models/ prefix
         val cleanModel = model.removePrefix("models/").trim().ifBlank { UiGeminiModel.DEFAULT_MODEL_ID }
         val url = "$baseUrl/v1beta/models/$cleanModel:generateContent?key=$apiKey"
+
+        // 4. Measure timings using System.currentTimeMillis() and Logcat tag "GeminiPerf"
+        val requestStartTime = System.currentTimeMillis()
+        Log.i("GeminiPerf", "[$cleanModel] 1. Request sent at: $requestStartTime ms (history count: ${trimmedHistory.size})")
 
         try {
             val response = executeWithRetry {
@@ -359,6 +382,8 @@ class GeminiApiService {
             val responseBody = response.body?.string() ?: ""
 
             if (!response.isSuccessful) {
+                val errorTime = System.currentTimeMillis()
+                Log.e("GeminiPerf", "[$cleanModel] Request failed at: $errorTime ms (duration: ${errorTime - requestStartTime} ms, HTTP ${response.code})")
                 val errorDetails = parseApiErrorDetails(response.code, responseBody)
                 return@withContext Result.failure(
                     ApiException(
@@ -375,6 +400,10 @@ class GeminiApiService {
             val candidate = parsedResponse.candidates?.firstOrNull()
             val candidateText = candidate?.content?.parts?.firstOrNull()?.text
 
+            val completionTime = System.currentTimeMillis()
+            val totalDuration = completionTime - requestStartTime
+            Log.i("GeminiPerf", "[$cleanModel] 3. Response completed at: $completionTime ms. Total duration: ${totalDuration} ms (TTFT: ${totalDuration} ms)")
+
             if (!candidateText.isNullOrBlank()) {
                 Result.success(candidateText)
             } else {
@@ -387,8 +416,12 @@ class GeminiApiService {
                 }
             }
         } catch (e: IOException) {
+            val errorTime = System.currentTimeMillis()
+            Log.e("GeminiPerf", "[$cleanModel] Network error after ${errorTime - requestStartTime} ms: ${e.message}")
             Result.failure(Exception("Нет подключения к интернету или превышено время ожидания."))
         } catch (e: Exception) {
+            val errorTime = System.currentTimeMillis()
+            Log.e("GeminiPerf", "[$cleanModel] Error after ${errorTime - requestStartTime} ms: ${e.message}")
             Result.failure(e)
         }
     }
@@ -396,7 +429,7 @@ class GeminiApiService {
     /**
      * Streaming generateContent with automatic retry (up to 3 attempts total)
      * on connection failure or stream errors caused by 503, UNAVAILABLE, overloaded, or resource exhausted.
-     * Emits chunks of text in real time via Kotlin Flow.
+     * Emits chunks of text in real time via Kotlin Flow directly as SSE lines arrive.
      */
     fun generateContentStream(
         apiKey: String,
@@ -410,8 +443,16 @@ class GeminiApiService {
             throw IllegalArgumentException("Недействительный API-ключ. Проверьте правильность ключа в настройках.")
         }
 
+        // 3. Optimize history context: limit to last 15 messages (trim context)
+        val trimmedHistory = if (conversationHistory.size > 15) {
+            val last15 = conversationHistory.takeLast(15)
+            last15.dropWhile { it.role != MessageRole.USER }.ifEmpty { last15 }
+        } else {
+            conversationHistory
+        }
+
         val contents = mutableListOf<ContentItem>()
-        for (msg in conversationHistory) {
+        for (msg in trimmedHistory) {
             if (msg.role == MessageRole.ERROR) continue
             val parts = mutableListOf<PartItem>()
             if (msg.role == MessageRole.USER && msg.attachments.isNotEmpty()) {
@@ -433,17 +474,20 @@ class GeminiApiService {
             SystemInstructionItem(parts = listOf(PartItem(text = systemInstruction.trim())))
         } else null
 
+        // 2. Disable thinking delay with thinkingBudget = 0 in generationConfig
         val requestPayload = GeminiGenerateRequest(
             contents = contents,
             systemInstruction = systemInst,
             generationConfig = GenerationConfigItem(
                 temperature = temperature.coerceIn(0.0f, 2.0f),
-                maxOutputTokens = 4096
+                maxOutputTokens = 4096,
+                thinkingConfig = ThinkingConfigItem(thinkingBudget = 0)
             )
         )
 
         val baseUrl = getEffectiveBaseUrl(customBaseUrl)
         val cleanModel = model.removePrefix("models/").trim().ifBlank { UiGeminiModel.DEFAULT_MODEL_ID }
+        // 1. Ensure streaming endpoint :streamGenerateContent?alt=sse
         val url = "$baseUrl/v1beta/models/$cleanModel:streamGenerateContent?alt=sse&key=$apiKey"
         val jsonPayload = gson.toJson(requestPayload)
 
@@ -451,6 +495,11 @@ class GeminiApiService {
         val retryDelaysMs = listOf(1500L, 3000L)
         var attempt = 0
         var hasEmittedAnyText = false
+
+        // 4. Measure timings using System.currentTimeMillis() and Logcat tag "GeminiPerf"
+        val requestStartTime = System.currentTimeMillis()
+        var firstChunkTime: Long? = null
+        Log.i("GeminiPerf", "[$cleanModel] 1. Request sent at: $requestStartTime ms (history count: ${trimmedHistory.size})")
 
         while (attempt < maxAttempts) {
             attempt++
@@ -491,6 +540,7 @@ class GeminiApiService {
                 }
 
                 val body = response.body ?: throw IOException("Пустой ответ от сервера")
+                // Read stream directly line-by-line without buffering entire body into memory
                 val reader = BufferedReader(InputStreamReader(body.byteStream(), Charsets.UTF_8), 1024)
 
                 try {
@@ -525,7 +575,14 @@ class GeminiApiService {
                                     for (part in parts) {
                                         val partText = part.text
                                         if (!partText.isNullOrEmpty()) {
+                                            // 4. Log TTFT (Time To First Token) upon receiving first chunk
+                                            if (firstChunkTime == null) {
+                                                firstChunkTime = System.currentTimeMillis()
+                                                val ttft = firstChunkTime!! - requestStartTime
+                                                Log.i("GeminiPerf", "[$cleanModel] 2. First chunk received (TTFT): ${ttft} ms (at $firstChunkTime ms)")
+                                            }
                                             hasEmittedAnyText = true
+                                            // 1. Emit chunk immediately to UI
                                             emit(partText)
                                         }
                                     }
@@ -554,12 +611,23 @@ class GeminiApiService {
                     delay(retryDelaysMs[attempt - 1])
                     continue
                 }
+                val errorTime = System.currentTimeMillis()
+                Log.e("GeminiPerf", "[$cleanModel] Stream failed at $errorTime ms (duration: ${errorTime - requestStartTime} ms): ${streamError.message}")
                 throw streamError
             }
 
             if (!hasEmittedAnyText) {
+                val errorTime = System.currentTimeMillis()
+                Log.e("GeminiPerf", "[$cleanModel] Stream ended without tokens after ${errorTime - requestStartTime} ms")
                 throw Exception("Получен пустой ответ от модели Gemini.")
             }
+
+            // 4. Log full completion time
+            val completionTime = System.currentTimeMillis()
+            val totalDuration = completionTime - requestStartTime
+            val ttftDuration = if (firstChunkTime != null) firstChunkTime!! - requestStartTime else totalDuration
+            Log.i("GeminiPerf", "[$cleanModel] 3. Stream completed at: $completionTime ms. Total duration: ${totalDuration} ms, TTFT: ${ttftDuration} ms")
+
             return@flow
         }
     }.flowOn(Dispatchers.IO)
