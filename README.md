@@ -23,36 +23,6 @@
 
 ---
 
-## 🛠 Как получить APK файл
-
-### Способ 1: Сборка в Android Studio (Рекомендуется)
-1. Установите [Android Studio](https://developer.android.com/studio) (любую актуальную версию Jellyfish / Koala / Ladybug).
-2. Нажмите **File -> Open...** и выберите папку `android`.
-3. Дождитесь автоматической синхронизации Gradle (1-2 минуты).
-4. Перейдите в меню: **Build -> Build Bundle(s) / APK(s) -> Build APK(s)**.
-5. Готовый файл появится по пути:
-   `android/app/build/outputs/apk/debug/app-debug.apk`
-   или
-   `android/app/build/outputs/apk/release/app-release.apk`
-6. Перенесите APK на телефон и установите (разрешив установку из неизвестных источников).
-
-### Способ 2: Сборка через консоль (Терминал)
-Если на компьютере установлен JDK 17:
-```bash
-cd android
-./gradlew assembleRelease
-# или для отладочной версии:
-./gradlew assembleDebug
-```
-APK файл будет скомпилирован в `android/app/build/outputs/apk/`.
-
-### Способ 3: Бесплатная онлайн-сборка через GitHub Actions (Без Android Studio!)
-В репозитории уже настроен workflow: `.github/workflows/build-apk.yml`.
-1. Загрузите проект в ваш репозиторий на GitHub.
-2. Перейдите во вкладку **Actions**.
-3. Запустите workflow **Build Nova AI APK** (или сделайте git push).
-4. Через 2-3 минуты скачайте готовый `.apk` из раздела **Artifacts**!
-
 ---
 
 ## 🔑 Начало работы
